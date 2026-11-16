@@ -1,0 +1,5 @@
+node_modules/
+_backup_*/
+dist/demo-harness.html
+.claude/
+dist/_gallery/

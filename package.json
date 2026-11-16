@@ -1,0 +1,21 @@
+{
+  "name": "risu-theme-preset-v3",
+  "version": "1.0.0",
+  "description": "RisuAI Plugin API v3.0 theme preset, regex transformation, and live preview manager",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "release": "node scripts/release.mjs",
+    "test": "node --test tests/plugin.test.mjs"
+  },
+  "keywords": [
+    "risuai",
+    "plugin",
+    "v3",
+    "theme",
+    "preset",
+    "regex",
+    "preview"
+  ],
+  "license": "MIT"
+}

@@ -418,17 +418,24 @@ function formatPlainTextToSampleHtml(rawText) {
   return paragraphs.join('\n');
 }
 
-/** 미리보기용 샘플 초상 (사람 윤곽이 있는 그라디언트 SVG) */
+/** 미리보기용 샘플 초상 (스튜디오 조명 느낌의 실루엣 SVG) */
 export function previewAvatarUri(role) {
-  const [from, to] = role === 'char' ? ['#6366f1', '#ec4899'] : ['#0ea5e9', '#14b8a6'];
+  const isChar = role === 'char';
+  const bgTop = isChar ? '#23263d' : '#1b2b34';
+  const bgBot = isChar ? '#4b345c' : '#2e4d54';
+  const glow = isChar ? 'rgba(218,165,205,.46)' : 'rgba(232,196,138,.44)';
+  const rim = isChar ? 'rgba(255,255,255,.72)' : 'rgba(255,248,236,.74)';
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" preserveAspectRatio="xMidYMid slice">' +
-    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
-    `<stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/>` +
-    '</linearGradient></defs>' +
-    '<rect width="120" height="150" fill="url(#g)"/>' +
-    '<circle cx="60" cy="56" r="25" fill="rgba(255,255,255,.55)"/>' +
-    '<path d="M12 150c4-36 25-54 48-54s44 18 48 54z" fill="rgba(255,255,255,.55)"/>' +
+    '<defs>' +
+    `<linearGradient id="bg" x1="0" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="${bgTop}"/><stop offset="1" stop-color="${bgBot}"/></linearGradient>` +
+    `<radialGradient id="gl" cx=".5" cy=".34" r=".55"><stop offset="0" stop-color="${glow}"/><stop offset="1" stop-color="transparent"/></radialGradient>` +
+    `<linearGradient id="sil" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${rim}" stop-opacity=".86"/><stop offset="1" stop-color="${rim}" stop-opacity=".56"/></linearGradient>` +
+    '</defs>' +
+    '<rect width="120" height="150" fill="url(#bg)"/>' +
+    '<rect width="120" height="150" fill="url(#gl)"/>' +
+    '<circle cx="60" cy="54" r="22" fill="url(#sil)"/>' +
+    '<path d="M16 150c4-35 23-51 44-51s40 16 44 51z" fill="url(#sil)"/>' +
     '</svg>';
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -525,6 +532,7 @@ function createSlotRenderer(bodyHtml, editing, palette, role) {
 export function buildPreviewSrcdoc(preset, options = {}) {
   const {
     palette = 'dark',
+    backdrop = 'sky',
     roleFilter = 'all',
     customSampleText = '',
     charName = '세라 (Sera)',
@@ -563,10 +571,10 @@ export function buildPreviewSrcdoc(preset, options = {}) {
     ];
   } else {
     scenarios = [
+      { role: 'char', body: '', editing: true },
       { role: 'char', body: shortBody, editing: false },
       { role: 'user', body: shortBody, editing: false },
-      { role: 'char', body: longBody, editing: false },
-      { role: 'char', body: '', editing: true }
+      { role: 'char', body: longBody, editing: false }
     ];
   }
 
@@ -589,7 +597,9 @@ export function buildPreviewSrcdoc(preset, options = {}) {
     `<div class="flex flex-col-reverse" style="display:flex;flex-direction:column-reverse">${cardsHtml}</div>` +
     '</div>';
 
-  const bodyBg = previewSkyBackground(palette);
+  const bodyBg = backdrop === 'solid'
+    ? (palette === 'light' ? '#f3f4f6' : '#181a20')
+    : previewSkyBackground(palette);
   const hostColorOverride = palette === 'light'
     ? `:root { --FontColorStandard: #0f172a; --FontColorBold: #0f172a; --FontColorItalic: #64748b; } .risu-test-host { color: #0f172a; }`
     : '';

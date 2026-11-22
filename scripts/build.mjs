@@ -208,6 +208,9 @@ function buildDemoHarnessHtml(pluginBundleCode) {
     display: grid;
     grid-template-columns: 360px 1fr;
   }
+  @media (max-width: 760px) {
+    .host-main { grid-template-columns: minmax(0, 1fr); }
+  }
   .host-sidebar {
     border-right: 1px solid #30363d;
     padding: 12px;

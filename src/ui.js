@@ -45,47 +45,51 @@ const UI_ROOT_ID = 'rtpv3-app';
 
 const UI_CSS = `
 #${UI_ROOT_ID} {
-    --rtpv3-bg: #0d1117;
-    --rtpv3-bg-sunken: #090c10;
-    --rtpv3-surface: #161b22;
-    --rtpv3-surface-2: #1c2129;
-    --rtpv3-hover: #21262d;
-    --rtpv3-border: #30363d;
-    --rtpv3-border-soft: #262c34;
-    --rtpv3-text: #e6edf3;
-    --rtpv3-text-2: #c9d1d9;
-    --rtpv3-muted: #8b949e;
-    --rtpv3-accent: #388bfd;
-    --rtpv3-accent-bg: #1f6feb;
-    --rtpv3-accent-soft: rgba(56, 139, 253, 0.14);
-    --rtpv3-ok: #2ea043;
-    --rtpv3-ok-bg: #238636;
-    --rtpv3-ok-text: #7ee787;
-    --rtpv3-warn: #d29922;
-    --rtpv3-warn-text: #f2cc60;
-    --rtpv3-danger: #f85149;
-    --rtpv3-danger-bg: #3c1e22;
-    --rtpv3-danger-text: #ffb4ae;
-    --rtpv3-radius: 8px;
-    --rtpv3-radius-sm: 6px;
+    --rtpv3-bg: #0c0e14;
+    --rtpv3-bg-sunken: #080a0f;
+    --rtpv3-surface: #131620;
+    --rtpv3-surface-2: #1a1e2b;
+    --rtpv3-hover: #222738;
+    --rtpv3-border: rgba(255, 255, 255, 0.095);
+    --rtpv3-border-soft: rgba(255, 255, 255, 0.055);
+    --rtpv3-text: #eef1f7;
+    --rtpv3-text-2: #c8d0de;
+    --rtpv3-muted: #8892a4;
+    --rtpv3-accent: #6c8cff;
+    --rtpv3-accent-bg: #4f6ef7;
+    --rtpv3-accent-soft: rgba(108, 140, 255, 0.14);
+    --rtpv3-ok: #22a055;
+    --rtpv3-ok-bg: #1d8a49;
+    --rtpv3-ok-text: #74e8a1;
+    --rtpv3-warn: #d89e2a;
+    --rtpv3-warn-text: #f5d167;
+    --rtpv3-danger: #ef5b5b;
+    --rtpv3-danger-bg: #3b1d24;
+    --rtpv3-danger-text: #ffb3b3;
+    --rtpv3-radius: 10px;
+    --rtpv3-radius-sm: 7px;
     --rtpv3-mono: "Cascadia Code", "JetBrains Mono", "D2Coding", Consolas, monospace;
     position: fixed;
     inset: 0;
     z-index: 9999;
     display: flex;
     flex-direction: column;
+    max-width: 100%;
+    overflow: hidden;
     background: var(--rtpv3-bg);
     color: var(--rtpv3-text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
     font-size: 13px;
     line-height: 1.45;
     box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
 }
 #${UI_ROOT_ID} *, #${UI_ROOT_ID} *::before, #${UI_ROOT_ID} *::after {
     box-sizing: border-box;
 }
-#${UI_ROOT_ID} ::-webkit-scrollbar { width: 10px; height: 10px; }
-#${UI_ROOT_ID} ::-webkit-scrollbar-thumb { background: #2b313a; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+#${UI_ROOT_ID} ::-webkit-scrollbar { width: 9px; height: 9px; }
+#${UI_ROOT_ID} ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.13); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+#${UI_ROOT_ID} ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); border: 2px solid transparent; background-clip: padding-box; }
 #${UI_ROOT_ID} ::-webkit-scrollbar-track { background: transparent; }
 #${UI_ROOT_ID} button, #${UI_ROOT_ID} input, #${UI_ROOT_ID} select, #${UI_ROOT_ID} textarea {
     font-family: inherit;
@@ -290,11 +294,13 @@ const UI_CSS = `
 .rtpv3-panel-body {
     flex: 1 1 auto;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 12px;
     min-height: 0;
+    min-width: 0;
 }
 .rtpv3-row { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .rtpv3-wrap { flex-wrap: wrap; }
@@ -302,6 +308,8 @@ const UI_CSS = `
 .rtpv3-muted { color: var(--rtpv3-muted); font-size: 11px; }
 
 /* 미리보기 크게 보기: 편집 칸을 접고 미리보기가 그 자리까지 넓어진다 (좁은 화면에서는 탭으로 오가므로 쓰지 않는다). */
+.rtpv3-pv-apply-btn { display: none; }
+#${UI_ROOT_ID}[data-pvwide="on"] .rtpv3-pv-apply-btn { display: inline-flex; align-items: center; }
 @media (min-width: 761px) {
     #${UI_ROOT_ID}[data-pvwide="on"] .rtpv3-workspace {
         grid-template-columns: 260px minmax(0, 1fr);
@@ -313,7 +321,10 @@ const UI_CSS = `
 @media (min-width: 761px) and (max-width: 1180px) {
     #${UI_ROOT_ID}[data-pvwide="on"] .rtpv3-workspace { grid-template-columns: 230px minmax(0, 1fr); }
 }
-@media (max-width: 760px) { .rtpv3-pvwide-btn { display: none; } }
+@media (max-width: 760px) {
+    .rtpv3-pvwide-btn { display: none; }
+    .rtpv3-pv-apply-btn { display: inline-flex; align-items: center; }
+}
 
 @media (max-width: 1180px) {
     .rtpv3-workspace {
@@ -337,8 +348,39 @@ const UI_CSS = `
     .rtpv3-header-badge { display: none; }
 }
 
+/* 검색 입력 & 지우기 */
+.rtpv3-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+#${UI_ROOT_ID} .rtpv3-search-wrap input {
+    padding-right: 26px;
+}
+#${UI_ROOT_ID} .rtpv3-search-clear {
+    position: absolute;
+    right: 4px;
+    width: 20px;
+    min-height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--rtpv3-muted);
+    font-size: 14px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+#${UI_ROOT_ID} .rtpv3-search-clear:hover:not(:disabled) {
+    color: var(--rtpv3-text);
+    background: var(--rtpv3-hover);
+    border-color: transparent;
+}
+
 /* 프리셋 목록 */
-.rtpv3-preset-list { display: flex; flex-direction: column; gap: 6px; }
+.rtpv3-preset-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
 .rtpv3-preset-card {
     padding: 9px 10px;
     border: 1px solid var(--rtpv3-border-soft);
@@ -350,10 +392,17 @@ const UI_CSS = `
     gap: 4px;
     text-align: left;
     width: 100%;
-    transition: border-color 0.15s, background 0.15s;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
-.rtpv3-preset-card:hover { border-color: #4a5260; background: var(--rtpv3-surface-2); }
-.rtpv3-preset-card.selected { border-color: var(--rtpv3-accent); background: #152132; }
+.rtpv3-preset-card:hover { border-color: rgba(255, 255, 255, 0.2); background: var(--rtpv3-surface-2); }
+.rtpv3-preset-card.selected {
+    border-color: var(--rtpv3-accent);
+    background: rgba(108, 140, 255, 0.11);
+    box-shadow: inset 0 0 0 1px rgba(108, 140, 255, 0.22);
+}
 .rtpv3-preset-card.unsaved { border-style: dashed; }
 .rtpv3-preset-card-title {
     display: flex;
@@ -361,12 +410,37 @@ const UI_CSS = `
     gap: 6px;
     font-weight: 600;
     min-width: 0;
+    max-width: 100%;
+}
+.rtpv3-swatch {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+.rtpv3-swatch.is-glass {
+    border-color: rgba(255, 255, 255, 0.48);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.rtpv3-swatch-dot {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.28);
 }
 .rtpv3-preset-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rtpv3-dirty-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rtpv3-warn); flex-shrink: 0; }
 .rtpv3-preset-desc {
     font-size: 11px;
     color: var(--rtpv3-muted);
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -383,6 +457,8 @@ const UI_CSS = `
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
+    max-width: 100%;
     border: 1px solid var(--rtpv3-border-soft);
     border-radius: var(--rtpv3-radius);
     background: rgba(255, 255, 255, 0.015);
@@ -417,7 +493,7 @@ const UI_CSS = `
 }
 #${UI_ROOT_ID} .rtpv3-group-rename { min-height: 22px; padding: 0 6px; opacity: 0.6; }
 #${UI_ROOT_ID} .rtpv3-group-rename:hover { opacity: 1; }
-.rtpv3-group-body { display: flex; flex-direction: column; gap: 6px; padding-left: 6px; }
+.rtpv3-group-body { display: flex; flex-direction: column; gap: 6px; padding-left: 6px; min-width: 0; max-width: 100%; }
 .rtpv3-list-end { min-height: 36px; border-radius: var(--rtpv3-radius); }
 .rtpv3-preset-card, .rtpv3-group-head {
     -webkit-touch-callout: none;
@@ -459,7 +535,7 @@ const UI_CSS = `
 }
 .rtpv3-list-section::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--rtpv3-border-soft); }
 .rtpv3-list-section:first-child { margin-top: 0; }
-.rtpv3-user-section { display: flex; flex-direction: column; gap: 6px; }
+.rtpv3-user-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
 .rtpv3-builtin-note {
     font-size: 12px;
     color: var(--rtpv3-text-2);
@@ -900,6 +976,46 @@ function attachCodeEditorKeys(textarea) {
     });
 }
 
+/** 프리셋 CSS에서 대표 배경색·강조색·글래스 여부를 추출해 카드 스와치에 쓴다. */
+function extractPresetSwatch(preset) {
+    const css = String(preset?.customCSS ?? '');
+    const vars = {};
+    const varRe = /(--[a-z0-9-]+)\s*:\s*([^;]+);/gi;
+    let m;
+    while ((m = varRe.exec(css)) !== null) {
+        vars[m[1].toLowerCase()] = m[2].trim();
+    }
+
+    const pickColor = (raw) => {
+        if (!raw) return '';
+        const colorMatch = /(#[0-9a-f]{3,8}|rgba?\([^)]+\))/i.exec(raw);
+        if (colorMatch) return colorMatch[1];
+        const rgbTriplet = /^\s*(\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3})\s*$/.exec(raw);
+        return rgbTriplet ? `rgb(${rgbTriplet[1]})` : '';
+    };
+
+    const findBySuffix = (suffixes, exclude = []) => {
+        for (const sfx of suffixes) {
+            for (const [k, v] of Object.entries(vars)) {
+                if (k.endsWith(sfx) && !exclude.some((ex) => k.endsWith(ex))) {
+                    const c = pickColor(v);
+                    if (c && c !== 'transparent') return c;
+                }
+            }
+        }
+        return '';
+    };
+
+    const surface = findBySuffix(['-paper', '-panel', '-bezel', '-bubble-bg', '-bg'], ['-edit-bg', '-code-bg', '-chip-bg']) || '#242a3a';
+    const accent = findBySuffix(['-accent', '-seal', '-tint', '-quote', '-dialog']) || '#6c8cff';
+
+    const blurVars = Object.entries(vars).filter(([k]) => k.endsWith('-blur'));
+    const lastBlur = blurVars.length ? blurVars[blurVars.length - 1][1] : '';
+    const isGlass = /blur\(/i.test(lastBlur) || (/backdrop-filter\s*:\s*(?:var\(|blur\()/i.test(css) && lastBlur !== 'none');
+
+    return { surface, accent, isGlass };
+}
+
 export function createPluginUI({
     getState,
     setState,
@@ -931,12 +1047,13 @@ export function createPluginUI({
         draftIsNew: false,
         searchQuery: '',
         activeTab: 'editor',
-        mobileView: 'editor',
+        mobileView: typeof window !== 'undefined' && window.innerWidth <= 760 ? 'list' : 'editor',
         menuOpen: false,
         helpMode: false,
         previewWidth: '100%',
         previewWide: false,
         previewPalette: initialPalette === 'light' ? 'light' : 'dark',
+        previewBackdrop: 'sky',
         previewRoleFilter: 'all',
         previewApplyRegex: true,
         previewCharName: '세라',
@@ -1025,7 +1142,7 @@ export function createPluginUI({
         uiState.draftPreset = clonePresetDraft(found);
         uiState.hasUnsavedDraft = false;
         uiState.draftIsNew = false;
-        uiState.mobileView = 'editor';
+        uiState.mobileView = isBuiltinId(found.id) ? 'preview' : 'editor';
         render();
     }
 
@@ -1205,6 +1322,7 @@ export function createPluginUI({
         layoutPreviewFrame();
         const srcdoc = buildPreviewSrcdoc(uiState.draftPreset, {
             palette: uiState.previewPalette,
+            backdrop: uiState.previewBackdrop,
             roleFilter: uiState.previewRoleFilter,
             applyRegex: uiState.previewApplyRegex,
             charName: uiState.previewCharName,
@@ -1702,14 +1820,29 @@ export function createPluginUI({
             help: 'list.search',
             dataset: { focusKey: 'search' },
         });
-        head.appendChild(searchInput);
+        const clearBtn = el('button', {
+            type: 'button',
+            className: 'rtpv3-search-clear',
+            text: '×',
+            'aria-label': '검색어 지우기',
+            style: { display: uiState.searchQuery ? 'inline-flex' : 'none' },
+            onClick: () => {
+                uiState.searchQuery = '';
+                searchInput.value = '';
+                clearBtn.style.display = 'none';
+                renderPresetListItems(listContainer, normalizePluginState(getState()));
+                searchInput.focus();
+            },
+        });
+        head.appendChild(el('div', { className: 'rtpv3-search-wrap' }, [searchInput, clearBtn]));
         panel.appendChild(head);
 
         const body = el('div', { className: 'rtpv3-panel-body', dataset: { scrollKey: 'list' } });
         const listContainer = el('div', { className: 'rtpv3-preset-list', role: 'list' });
         searchInput.addEventListener('input', (e) => {
             uiState.searchQuery = e.target.value;
-            renderPresetListItems(listContainer, state);
+            clearBtn.style.display = uiState.searchQuery ? 'inline-flex' : 'none';
+            renderPresetListItems(listContainer, normalizePluginState(getState()));
         });
         renderPresetListItems(listContainer, state);
         attachListDrag(listContainer);
@@ -1855,7 +1988,7 @@ export function createPluginUI({
             dataset: isNew || builtin ? {} : { dragId: preset.id, dropPreset: preset.id },
             onClick: () => {
                 if (isNew || isSelected) {
-                    uiState.mobileView = 'editor';
+                    uiState.mobileView = !isNew && isBuiltinId(preset.id) ? 'preview' : 'editor';
                     render();
                     return;
                 }
@@ -1863,7 +1996,23 @@ export function createPluginUI({
             },
         });
 
+        const swatch = extractPresetSwatch(preset);
+        const swatchEl = el(
+            'span',
+            {
+                className: `rtpv3-swatch${swatch.isGlass ? ' is-glass' : ''}`,
+                'aria-hidden': 'true',
+                style: {
+                    background: swatch.isGlass
+                        ? `linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.04)), ${swatch.surface}`
+                        : swatch.surface,
+                },
+            },
+            [el('span', { className: 'rtpv3-swatch-dot', style: { background: swatch.accent } })],
+        );
+
         const titleRow = el('div', { className: 'rtpv3-preset-card-title' }, [
+            swatchEl,
             el('span', { className: 'rtpv3-preset-name', text: preset.name || '이름 없는 프리셋' }),
         ]);
         if (isSelected && !isNew) {
@@ -2857,14 +3006,23 @@ export function createPluginUI({
         return wrap;
     }
 
-    function createPreviewPanel() {
+    function createPreviewPanel(state = normalizePluginState(getState())) {
         const panel = el('section', { className: 'rtpv3-panel rtpv3-panel-preview' });
+        const isActive = !uiState.draftIsNew && Boolean(uiState.draftPreset) && state.activePresetId === uiState.draftPreset.id;
 
         const head = el('div', { className: 'rtpv3-panel-head' });
         head.appendChild(
             el('div', { className: 'rtpv3-panel-title' }, [
                 el('span', { text: '미리보기' }),
-                el('span', { className: 'rtpv3-muted', text: '편집 중인 내용이 바로 보입니다' }),
+                el('div', { className: 'rtpv3-row' }, [
+                    el('span', { className: 'rtpv3-muted', text: '실시간 반영' }),
+                    el('button', {
+                        className: 'primary small rtpv3-pv-apply-btn',
+                        text: isActive ? 'RisuAI에 다시 적용' : 'RisuAI에 적용',
+                        help: 'pv.apply',
+                        onClick: () => handleActivatePreset(uiState.draftPreset),
+                    }),
+                ]),
             ]),
         );
         head.appendChild(
@@ -2903,6 +3061,19 @@ export function createPluginUI({
                     },
                     '앱 배색',
                     'pv.palette',
+                ),
+                segment(
+                    [
+                        ['sky', '노을'],
+                        ['solid', '단색'],
+                    ],
+                    uiState.previewBackdrop,
+                    (v) => {
+                        uiState.previewBackdrop = v;
+                        updatePreviewFrame();
+                    },
+                    '배경 화면',
+                    'pv.backdrop',
                 ),
                 segment(
                     [
@@ -3458,7 +3629,7 @@ export function createPluginUI({
         const workspace = el('main', { className: 'rtpv3-workspace' }, [
             createListPanel(state),
             createEditorPanel(state),
-            createPreviewPanel(),
+            createPreviewPanel(state),
         ]);
         rootEl.appendChild(workspace);
 

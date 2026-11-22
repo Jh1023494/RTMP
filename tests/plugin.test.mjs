@@ -265,6 +265,7 @@ test('Built-in presets: all valid, unique prefixes, and new ones reach existing 
     for (const preset of BUILTIN_PRESETS) {
         const v = validateTheme(preset.guiHTML, preset.customCSS);
         assert.equal(v.valid, true, preset.name + ': ' + v.errors.join(', '));
+        assert.equal(v.warnings.length, 0, preset.name + ' warnings: ' + v.warnings.join(', '));
     }
 
     // 기본 제공 프리셋은 저장하지 않고 코드에서 읽는다.
@@ -509,6 +510,18 @@ test('preview-engine evaluates CBS, sanitizes tags, and builds srcdoc with palet
         roleFilter: 'edit',
     });
     assert.ok(srcdocEditOnly.includes('<textarea class="message-edit-area"'));
+
+    const srcdocSolidDark = buildPreviewSrcdoc(preset, {
+        palette: 'dark',
+        backdrop: 'solid',
+    });
+    assert.ok(srcdocSolidDark.includes('body { background: #181a20; }'));
+
+    const srcdocSolidLight = buildPreviewSrcdoc(preset, {
+        palette: 'light',
+        backdrop: 'solid',
+    });
+    assert.ok(srcdocSolidLight.includes('body { background: #f3f4f6; }'));
 });
 
 test('storage & risu-bridge: load/save, JSON import/export, activatePreset, #customcss refresh, restoreVanilla, and regex hook', async () => {

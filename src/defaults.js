@@ -21,12 +21,16 @@ button { color: inherit; }
   margin: 4px 16px;
   padding: 8px;
   flex-grow: 1;
+  min-width: 0;
   display: flex;
   flex-direction: row;
   justify-content: flex-start;
   align-items: flex-start;
   max-width: 100%;
   color: #fafafa;
+}
+@media (max-width: 639px) {
+  .risu-test-host { margin: 4px 4px; padding: 4px; }
 }
 .chattext p { color: var(--FontColorStandard); }
 .chattext strong { color: var(--FontColorBold); }

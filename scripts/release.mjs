@@ -1,6 +1,6 @@
 /**
  * 배포용 폴더(결과물/)를 만든다.
- *  - 결과물/risu-theme-preset-v3.js     : RisuAI에 올리는 플러그인 파일
+ *  - 결과물/RISU Thema Manager Plugin V <버전>.js : RisuAI에 올리는 플러그인 파일
  *  - 결과물/프리셋/*.json               : 플러그인 ⋯ 메뉴의 "파일 불러오기"로 가져오는 프리셋 파일
  *  - 결과물/프리셋/전체-프리셋-묶음.json : 위 프리셋을 한 번에 가져오는 묶음
  *
@@ -84,7 +84,8 @@ export async function buildRelease() {
     await fs.rm(RELEASE_DIR, { recursive: true, force: true });
     await fs.mkdir(PRESET_DIR, { recursive: true });
 
-    const pluginPath = path.join(RELEASE_DIR, 'risu-theme-preset-v3.js');
+    const releasePluginName = `RISU Thema Manager Plugin V ${bundle.validation.meta.version}.js`;
+    const pluginPath = path.join(RELEASE_DIR, releasePluginName);
     await fs.copyFile(bundle.bundlePath, pluginPath);
 
     for (const { file, preset, groupName } of presets) {
@@ -113,7 +114,7 @@ export async function buildRelease() {
         '# Risu Theme Preset & Preview Manager',
         '',
         '## 설치',
-        '1. RisuAI 설정 → 플러그인에서 `risu-theme-preset-v3.js`를 불러옵니다.',
+        `1. RisuAI 설정 → 플러그인에서 \`${releasePluginName}\`를 불러옵니다.`,
         '2. 플러그인 설정의 **테마 프리셋 & 미리보기 관리자**를 눌러 관리자 창을 엽니다.',
         '3. 프리셋을 처음 적용할 때 RisuAI가 데이터베이스 읽기·쓰기 권한을 묻습니다. 허용해야 적용됩니다.',
         '',

@@ -1,7 +1,7 @@
 {
   "format": "risu-theme-preset-single",
   "version": 1,
-  "exportedAt": "2026-11-22T14:00:14.710Z",
+  "exportedAt": "2026-11-22T15:05:07.142Z",
   "preset": {
     "id": "preset_messenger-pair_white",
     "name": "메신저:양쪽 백색",
@@ -20,7 +20,7 @@
         "enabled": true
       }
     ],
-    "updatedAt": "2026-11-22T14:00:14.658Z",
+    "updatedAt": "2026-11-22T15:05:07.038Z",
     "groupName": "메신저"
   }
 }

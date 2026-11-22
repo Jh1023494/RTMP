@@ -1,7 +1,7 @@
 //@name risu_theme_preset_v3
 //@display-name Risu Theme Preset & Preview Manager
 //@api 3.0
-//@version 1.0.0
+//@version 1.0.1
 //@update-url https://raw.githubusercontent.com/Jh1023494/RTMP/main/dist/risu-theme-preset-v3.js
 //@arg disable_display_regex int {{name::프리셋 디스플레이 정규식 끄기}} {{checkbox::활성 프리셋의 정규식을 채팅에 적용하지 않음}}
 //@arg default_preview_palette string {{name::미리보기 기본 앱 배색}} {{radio::다크|dark,라이트|light}}
@@ -2619,7 +2619,13 @@ const CONTENT_CSS = `
 
 /* 조작부: 생성 정보와 Risu 기본 버튼만 다듬고, 서드파티 플러그인 버튼 모양은 유지합니다. */
 .{p}__footer {
+  /* RisuAI(Tailwind v4)는 버튼 색을 --color-textcolor2로 칠하고, 이 변수는 페이지 맨 위에서 이미 앱 설정 색으로 정해져 있습니다.
+     --risu-theme-textcolor2만 바꾸면 버튼은 앱 색으로 남아 종이·어두운 바탕에서 보이지 않으므로, 버튼이 실제로 쓰는 변수를 여기서 다시 정합니다. */
   --risu-theme-textcolor2: var(--{p}-muted);
+  --color-textcolor2: var(--{p}-muted);
+  --color-textcolor: var(--{p}-ink);
+  --color-darkborderc: var(--{p}-line);
+  --color-darkbutton: var(--{p}-line);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2629,7 +2635,7 @@ const CONTENT_CSS = `
   color: var(--{p}-muted);
 }
 .{p}__info, .{p}__actions { min-width: 0; max-width: 100%; }
-.{p}__info > div, .{p}__actions > div { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: .25rem; }
+.{p}__info > div, .{p}__actions > div { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: .25rem; color: var(--{p}-muted); }
 .{p}__actions > div > div { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: .05rem; }
 .{p}__info button.transition-all,
 .{p}__actions button[class*="button-icon-"] {
@@ -2685,11 +2691,15 @@ const CONTENT_CSS = `
   .{p} .{p}__bg { background: var(--{p}-bg-fallback, var(--{p}-bg-fill)); }
 }`;
 
-/** 조작부를 평소에는 숨기고, 마우스·포커스·편집 중이거나 휴대폰에서 보이게 한다. */
+/**
+ * PC에서는 조작부를 평소에 조금 흐리게 두고, 마우스·포커스·편집 중일 때 또렷하게 한다. 휴대폰에서는 늘 또렷하다.
+ * 완전히 숨기면 수정·재생성·번역 버튼이 있는지 알 수 없으므로 흐리게만 둔다.
+ */
 const QUIET_FOOTER_CSS = `
-.{p}__footer { opacity: 0; transition: opacity .2s ease; }
+.{p}__footer { opacity: .7; transition: opacity .2s ease; }
 .{p}:hover .{p}__footer, .{p}:focus-within .{p}__footer, .{p}:has(textarea.message-edit-area) .{p}__footer { opacity: 1; }
-@media (hover: none) { .{p}__footer { opacity: .68; } }`;
+/* 휴대폰처럼 마우스를 올릴 수 없는 화면에서는 늘 또렷하게 둡니다. */
+@media (hover: none) { .{p}__footer { opacity: 1; } }`;
 
 /**
  * 바탕 층: 카드 뒤에 깔리는 별도 요소. 글래스 변주의 흐림(backdrop-filter)과 표면 질감을 여기에만 둔다.
@@ -2708,6 +2718,21 @@ const BG_CSS = `
   backdrop-filter: var(--{p}-blur);
   box-shadow: var(--{p}-bg-edge);
 }`;
+
+/**
+ * 화면 폭을 다 칠하는 분류(서재·연재란·메신저 한쪽)용.
+ * RisuAI 채팅 화면은 메시지를 아래부터 쌓으므로, 대화가 짧으면 메시지 위쪽이 앱 기본 배경으로 남는다.
+ * 맨 위 메시지(첫인사, 또는 불러온 메시지 중 가장 오래된 것)의 그림자를 위로만 길게 늘려 그 빈 곳을 같은 바탕으로 칠한다.
+ * 그림자는 스크롤 길이를 늘리지 않고 아래쪽 입력창 자리도 덮지 않는다. 바탕이 투명한 글래스 변주에서는 아무것도 칠하지 않는다.
+ */
+function fillAboveCss(color) {
+    return `
+/* 짧은 대화: 맨 위 메시지 위쪽 빈 곳도 같은 바탕으로 칠합니다. */
+.default-chat-screen > .risu-chat .{p},
+.chat-message-container:last-child .{p} { box-shadow: 0 -100vh 0 100vh ${color}; }
+/* 첫인사 위에 RisuAI가 붙이는 안내문(AI 생성 안내, 제작자 메모)이 칠한 바탕 아래로 숨지 않게 합니다. */
+:where(.default-chat-screen > .risu-chat:has(.{p}) ~ *) { position: relative; }`;
+}
 
 /** 모든 분류에 공통으로 들어가는 기본값. 변주가 덮어쓴다. */
 const COMMON_TOKENS = {
@@ -2777,6 +2802,22 @@ function pairHtml(frameClass) {
 }
 
 /**
+ * PC에서 양옆 고정 초상과 ◐ 단추를 꺼내 올 메시지.
+ * 가장 최근 메시지가 기본이고, 그 메시지에 초상 조각이 없으면(편집 중, 생성 중) 바로 앞 메시지를 쓴다.
+ * 앞의 두 메시지에 모두 없거나 메시지가 하나도 없으면 첫인사를 쓴다. 세 경우는 서로 겹치지 않는다.
+ */
+const LIVE_SCOPES = [
+    '.chat-message-container:first-child',
+    '.chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container',
+    '.flex-col-reverse:not(:has(> .chat-message-container:nth-child(-n+2) .x-risu-{p}-pair)) + .risu-chat',
+];
+
+/** 대상 선택자마다 LIVE_SCOPES 세 범위를 붙여 쉼표로 잇는다. */
+function live(...targets) {
+    return targets.flatMap((target) => LIVE_SCOPES.map((scope) => `${scope} ${target}`)).join(',\n  ');
+}
+
+/**
  * 양쪽 공통 배치 CSS.
  * - PC(1040px 이상): 가장 최근 메시지 하나에서만 두 초상을 꺼내 채팅 영역 양옆에 고정하고, 가운데 열 폭을 여백에 맞춰 줄여 겹침을 막는다.
  * - 휴대폰·좁은 창(1039px 이하): 메시지마다 위에 두 초상이 마주 본다.
@@ -2820,9 +2861,7 @@ const PAIR_LAYOUT_CSS = `
 /* PC: 1040px 이상에서만 양옆 고정 초상을 띄우고 가운데 열과 겹치지 않게 폭을 확보합니다. */
 @media (min-width: 1040px) {
   .{p} { --{p}-col: min(44rem, calc(100% - 22rem)); }
-  .chat-message-container:first-child .{p} :is(.x-risu-{p}-pair-char, .x-risu-{p}-pair-user),
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p} :is(.x-risu-{p}-pair-char, .x-risu-{p}-pair-user),
-  .flex-col-reverse:empty + .risu-chat .{p} :is(.x-risu-{p}-pair-char, .x-risu-{p}-pair-user) {
+  ${live('.{p} :is(.x-risu-{p}-pair-char, .x-risu-{p}-pair-user)')} {
     display: block;
     position: fixed;
     z-index: 1;
@@ -2833,49 +2872,36 @@ const PAIR_LAYOUT_CSS = `
     aspect-ratio: 3 / 4;
     transition: opacity .3s ease, filter .3s ease, translate .3s ease, scale .3s ease;
   }
-  .chat-message-container:first-child .{p} .x-risu-{p}-pair-char,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p} .x-risu-{p}-pair-char,
-  .flex-col-reverse:empty + .risu-chat .{p} .x-risu-{p}-pair-char {
+  ${live('.{p} .x-risu-{p}-pair-char')} {
     left: var(--{p}-edge);
     transform: rotate(var(--{p}-tilt-char));
-    anchor-name: --{p}-portrait-char;
   }
-  .chat-message-container:first-child .{p} .x-risu-{p}-pair-user,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p} .x-risu-{p}-pair-user,
-  .flex-col-reverse:empty + .risu-chat .{p} .x-risu-{p}-pair-user {
+  ${live('.{p} .x-risu-{p}-pair-user')} {
     right: var(--{p}-edge);
     transform: rotate(var(--{p}-tilt-user));
   }
-  .chat-message-container:first-child .{p}--char .x-risu-{p}-pair-char,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p}--char .x-risu-{p}-pair-char,
-  .flex-col-reverse:empty + .risu-chat .{p}--char .x-risu-{p}-pair-char,
-  .chat-message-container:first-child .{p}--user .x-risu-{p}-pair-user,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p}--user .x-risu-{p}-pair-user,
-  .flex-col-reverse:empty + .risu-chat .{p}--user .x-risu-{p}-pair-user {
+  ${live('.{p}--char .x-risu-{p}-pair-char', '.{p}--user .x-risu-{p}-pair-user')} {
     translate: 0 -4px;
     scale: 1.018;
     filter: drop-shadow(0 16px 14px rgba(0, 0, 0, .24));
   }
-  .chat-message-container:first-child .{p} .x-risu-{p}-fade,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p} .x-risu-{p}-fade,
-  .flex-col-reverse:empty + .risu-chat .{p} .x-risu-{p}-fade {
+  ${live('.{p} .x-risu-{p}-fade')} {
+    /* 왼쪽 초상과 똑같은 칸을 투명하게 겹쳐 두고 그 왼쪽 위 모서리에 단추를 놓습니다.
+       앵커 위치 지정이 없는 브라우저(Firefox, 이전 Safari)에서도 단추가 초상에서 떨어지지 않습니다. */
     display: block;
     position: fixed;
     z-index: 2;
-    top: calc(var(--{p}-edge) + .6rem);
-    left: calc(var(--{p}-edge) + .6rem);
-    margin: 0;
-  }
-  @supports (anchor-name: --a) {
-    .chat-message-container:first-child .{p} .x-risu-{p}-fade,
-    .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p} .x-risu-{p}-fade,
-    .flex-col-reverse:empty + .risu-chat .{p} .x-risu-{p}-fade {
-      position-anchor: --{p}-portrait-char;
-      top: calc(anchor(top) + .6rem);
-      left: calc(anchor(left) + .6rem);
-    }
+    top: var(--{p}-edge);
+    bottom: var(--{p}-fixed-bottom);
+    left: var(--{p}-edge);
+    width: var(--{p}-fixed-w);
+    aspect-ratio: 3 / 4;
+    margin: auto 0;
+    padding: .6rem;
+    pointer-events: none;
   }
   .{p} .x-risu-{p}-fade > summary {
+    pointer-events: auto;
     display: grid;
     place-items: center;
     width: 1.9rem;
@@ -3708,7 +3734,8 @@ const THEME_FAMILIES = [
 .{p}__content :where(p:first-child, h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p, blockquote + p, ul + p, ol + p, pre + p, table + p, hr + p) { text-indent: 0; }
 .{p}--user .{p}__content :where(p) { text-indent: 0; }
 .{p}__footer { margin-top: .55rem; }
-${QUIET_FOOTER_CSS}`,
+${QUIET_FOOTER_CSS}
+${fillAboveCss('var(--{p}-outer)')}`,
         variants: BOOK_VARIANTS,
         baseTokens: {
             'font-body': SERIF,
@@ -3796,7 +3823,8 @@ ${QUIET_FOOTER_CSS}`,
 .{p}--user .{p}__content :where(p, li) { font-size: calc(var(--{p}-font-size) * .92) !important; line-height: 1.65 !important; }
 .{p}--user .{p}__content :where(p) { margin-bottom: .4em; }
 .{p}__footer { margin-top: .6rem; }
-${QUIET_FOOTER_CSS}`,
+${QUIET_FOOTER_CSS}
+${fillAboveCss('var(--{p}-outer)')}`,
         variants: WEBNOVEL_VARIANTS,
         baseTokens: {
             'font-body': SANS,
@@ -3835,12 +3863,7 @@ ${PAIR_LAYOUT_CSS}
   box-shadow: 0 0 0 1px var(--{p}-frame), 0 12px 28px var(--{p}-shadow);
 }
 @media (min-width: 1040px) {
-  .chat-message-container:first-child .{p}--char .x-risu-{p}-pair-char,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p}--char .x-risu-{p}-pair-char,
-  .flex-col-reverse:empty + .risu-chat .{p}--char .x-risu-{p}-pair-char,
-  .chat-message-container:first-child .{p}--user .x-risu-{p}-pair-user,
-  .chat-message-container:first-child:not(:has(.x-risu-{p}-pair)) + .chat-message-container .{p}--user .x-risu-{p}-pair-user,
-  .flex-col-reverse:empty + .risu-chat .{p}--user .x-risu-{p}-pair-user {
+  ${live('.{p}--char .x-risu-{p}-pair-char', '.{p}--user .x-risu-{p}-pair-user')} {
     box-shadow: 0 0 0 1.5px var(--{p}-accent), 0 16px 34px var(--{p}-shadow);
   }
 }
@@ -3925,7 +3948,8 @@ ${PAIR_LAYOUT_CSS}
 .{p}--user .{p}__main { align-items: flex-end; }
 .{p}--user .{p}__bubble { border-radius: 1.15rem; border-top-right-radius: .3rem; }
 .{p}--user .{p}__footer { justify-content: flex-end; }
-@media (max-width: 560px) { .{p}__bubble { max-width: 100%; } }`,
+@media (max-width: 560px) { .{p}__bubble { max-width: 100%; } }
+${fillAboveCss('var(--{p}-wall)')}`,
         variants: MESSENGER_VARIANTS,
         baseTokens: {
             'font-body': SANS,

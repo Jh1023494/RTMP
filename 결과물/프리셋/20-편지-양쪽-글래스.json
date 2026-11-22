@@ -1,7 +1,7 @@
 {
   "format": "risu-theme-preset-single",
   "version": 1,
-  "exportedAt": "2026-11-22T11:25:29.085Z",
+  "exportedAt": "2026-11-22T14:00:14.727Z",
   "preset": {
     "id": "preset_letter-pair_glass",
     "name": "편지:양쪽 글래스",
@@ -20,7 +20,7 @@
         "enabled": true
       }
     ],
-    "updatedAt": "2026-11-22T11:25:29.022Z",
+    "updatedAt": "2026-11-22T14:00:14.660Z",
     "groupName": "편지"
   }
 }

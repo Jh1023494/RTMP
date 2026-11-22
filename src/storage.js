@@ -71,6 +71,23 @@ export function normalizePresetItem(raw, index = 0) {
     };
 }
 
+export function presetHasHtml(preset) {
+    return typeof preset?.guiHTML === 'string' && preset.guiHTML.trim().length > 0;
+}
+
+export function presetHasCss(preset) {
+    return typeof preset?.customCSS === 'string' && preset.customCSS.trim().length > 0;
+}
+
+export function presetHasRegex(preset) {
+    return Array.isArray(preset?.regexRules) && preset.regexRules.some((rule) => rule && typeof rule.in === 'string' && rule.in.trim().length > 0);
+}
+
+/** HTML·CSS·정규식(찾을 패턴이 있는 규칙) 중 하나라도 채워져 있는지 확인한다. */
+export function hasPresetContent(preset) {
+    return presetHasHtml(preset) || presetHasCss(preset) || presetHasRegex(preset);
+}
+
 function normalizeGroupList(rawGroups) {
     const seen = new Set();
     const groups = [];
@@ -286,7 +303,7 @@ export function normalizeVanillaBackup(raw) {
     };
 }
 
-export const STATE_SCHEMA_VERSION = 2;
+export const STATE_SCHEMA_VERSION = 3;
 
 // ───────────────────────── 기본 제공 프리셋 ─────────────────────────
 // 기본 제공 프리셋은 저장하지 않고 매번 코드(BUILTIN_PRESETS)에서 읽는다.
@@ -383,7 +400,8 @@ export function makeUserCopyOfBuiltin(preset, suffix = '(수정)') {
 export function getDefaultPluginState() {
     return {
         schemaVersion: STATE_SCHEMA_VERSION,
-        activePresetId: null,
+        appliedPresetIds: [],
+        stackPresets: false,
         vanillaBackup: null,
         groups: [],
         presets: [],
@@ -438,7 +456,7 @@ export function migrateLegacyState(raw) {
             : null;
 
     return {
-        schemaVersion: STATE_SCHEMA_VERSION,
+        schemaVersion: 2,
         activePresetId,
         vanillaBackup: raw.vanillaBackup,
         groups: raw.groups,
@@ -448,11 +466,33 @@ export function migrateLegacyState(raw) {
     };
 }
 
+function migrateV2ToV3(raw) {
+    const appliedPresetIds = Array.isArray(raw.appliedPresetIds)
+        ? raw.appliedPresetIds
+        : typeof raw.activePresetId === 'string' && raw.activePresetId
+          ? [raw.activePresetId]
+          : [];
+    return {
+        ...raw,
+        schemaVersion: STATE_SCHEMA_VERSION,
+        appliedPresetIds,
+        stackPresets: raw.stackPresets === true,
+    };
+}
+
 export function normalizePluginState(raw) {
     if (!raw || typeof raw !== 'object') {
         return getDefaultPluginState();
     }
-    const source = (Number(raw.schemaVersion) || 1) < STATE_SCHEMA_VERSION ? migrateLegacyState(raw) : raw;
+    const hasV3Shape = Array.isArray(raw.appliedPresetIds) || typeof raw.stackPresets === 'boolean';
+    const rawVersion = Number(raw.schemaVersion) || (hasV3Shape ? STATE_SCHEMA_VERSION : 1);
+    let source = raw;
+    if (rawVersion < 2) {
+        source = migrateLegacyState(source);
+    }
+    if (rawVersion < 3) {
+        source = migrateV2ToV3(source);
+    }
     const currentBuiltinIds = new Set(getBuiltinPresets().map((p) => p.id));
 
     const seenIds = new Set();
@@ -467,18 +507,22 @@ export function normalizePluginState(raw) {
             return preset;
         });
 
-    const activePresetId =
-        typeof source.activePresetId === 'string' &&
-        (presets.some((p) => p.id === source.activePresetId) || currentBuiltinIds.has(source.activePresetId))
-            ? source.activePresetId
-            : null;
-
     const reconciled = reconcileGroups(presets, source.groups);
     const strings = (list) => [...new Set((Array.isArray(list) ? list : []).filter((v) => typeof v === 'string' && v))];
+    const presetIds = new Set(reconciled.presets.map((p) => p.id));
+    const stackPresets = source.stackPresets === true;
+
+    let appliedPresetIds = strings(source.appliedPresetIds).filter(
+        (id) => presetIds.has(id) || currentBuiltinIds.has(id),
+    );
+    if (!stackPresets && appliedPresetIds.length > 1) {
+        appliedPresetIds = [appliedPresetIds[0]];
+    }
 
     return {
         schemaVersion: STATE_SCHEMA_VERSION,
-        activePresetId,
+        appliedPresetIds,
+        stackPresets,
         vanillaBackup: normalizeVanillaBackup(source.vanillaBackup),
         groups: reconciled.groups,
         presets: reconciled.presets,
@@ -605,7 +649,7 @@ export function exportAllPresetsJson(state) {
             format: 'risu-theme-preset-bundle',
             version: 1,
             exportedAt: new Date().toISOString(),
-            activePresetId: normalized.activePresetId,
+            stackPresets: normalized.stackPresets,
             hiddenBuiltinIds: normalized.hiddenBuiltinIds,
             presets: normalized.presets.map((p) => presetForExport(p, getPresetGroupName(normalized, p))),
         },
@@ -650,6 +694,7 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
         } else if (
             typeof parsed.guiHTML === 'string' ||
             typeof parsed.customCSS === 'string' ||
+            Array.isArray(parsed.regexRules) ||
             typeof parsed.name === 'string'
         ) {
             rawCandidates = [parsed];
@@ -665,6 +710,7 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
     // 기본 제공 프리셋과 id가 같으면: 내용도 같으면 이미 있는 것이므로 건너뛰고, 다르면 사용자 복사본으로 들인다.
     const incomingGroupNames = [];
     const skippedBuiltins = [];
+    const skippedEmpty = [];
     const normalizedIncoming = [];
     rawCandidates.forEach((item, idx) => {
         let preset = normalizePresetItem(
@@ -675,6 +721,10 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
             },
             idx,
         );
+        if (!hasPresetContent(preset)) {
+            skippedEmpty.push(preset);
+            return;
+        }
         const builtin = getBuiltinPreset(preset.id);
         if (builtin) {
             if (presetFingerprint(preset) === presetFingerprint(builtin)) {
@@ -690,6 +740,9 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
         normalizedIncoming.push(preset);
         incomingGroupNames.push(item && typeof item.groupName === 'string' ? item.groupName : null);
     });
+    if (normalizedIncoming.length === 0 && skippedBuiltins.length === 0) {
+        throw new Error('HTML·CSS·정규식 중 하나 이상 채워진 프리셋이 없습니다.');
+    }
     const incomingHidden = parsed && Array.isArray(parsed.hiddenBuiltinIds) ? parsed.hiddenBuiltinIds : [];
     const applyIncomingGroups = (nextState) => {
         let result = nextState;
@@ -709,14 +762,14 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
     };
 
     if (mode === 'replace') {
-        const nextActiveId =
-            baseState.activePresetId && normalizedIncoming.some((p) => p.id === baseState.activePresetId)
-                ? baseState.activePresetId
-                : null;
+        const incomingIds = new Set(normalizedIncoming.map((p) => p.id));
+        const nextAppliedIds = baseState.appliedPresetIds.filter(
+            (id) => incomingIds.has(id) || isBuiltinId(id),
+        );
         const nextState = applyIncomingGroups(
             normalizePluginState({
                 ...baseState,
-                activePresetId: nextActiveId || (isBuiltinId(baseState.activePresetId) ? baseState.activePresetId : null),
+                appliedPresetIds: nextAppliedIds,
                 groups: [],
                 presets: normalizedIncoming,
                 hiddenBuiltinIds: incomingHidden,
@@ -728,6 +781,7 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
             addedCount: normalizedIncoming.length,
             updatedCount: 0,
             skippedBuiltinCount: skippedBuiltins.length,
+            skippedEmptyCount: skippedEmpty.length,
             importedPresets: nextState.presets,
             skippedBuiltins,
         };
@@ -763,6 +817,7 @@ export function importPresetsJson(jsonString, state, mode = 'merge') {
         addedCount,
         updatedCount,
         skippedBuiltinCount: skippedBuiltins.length,
+        skippedEmptyCount: skippedEmpty.length,
         importedPresets: normalizedIncoming,
         skippedBuiltins,
     };

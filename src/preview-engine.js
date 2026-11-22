@@ -15,6 +15,181 @@ export const RISU_VOID_TAGS = new Set(['img', 'hr', 'br', 'meta', 'link', 'input
 
 export const RISU_SLOT_TAGS = new Set(['risutextbox', 'risuicon', 'risubuttons', 'risugeninfo']);
 
+/** HTML이 없는 프리셋을 미리볼 때 사용하는 RisuAI 기본 화면 근사 틀 */
+export const FALLBACK_VANILLA_GUI_HTML = [
+  '<div class="risu-vanilla-fallback">',
+  '  <div class="risu-vanilla-fallback-avatar"><risuicon></risuicon></div>',
+  '  <div class="risu-vanilla-fallback-body">',
+  '    <div class="risu-vanilla-fallback-head">',
+  '      <strong class="risu-vanilla-fallback-name">{{#when::{{role}}::is::char}}{{char}}{{:else}}{{user}}{{/when}}</strong>',
+  '      <div class="risu-vanilla-fallback-meta"><risugeninfo></risugeninfo><risubuttons></risubuttons></div>',
+  '    </div>',
+  '    <risutextbox></risutextbox>',
+  '  </div>',
+  '</div>',
+].join('\n');
+
+/** CSS 주석 안에 프리셋 이름을 안전하게 넣는다 (주석 닫기·줄바꿈·태그 열기 차단). */
+export function sanitizeCssCommentText(text) {
+  return String(text ?? '')
+    .replace(/\*\//g, '* /')
+    .replace(/</g, '\u2039')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
+}
+
+/**
+ * 합친 CSS에서 최상위 @charset / @import 규칙을 맨 위로 끌어올린다.
+ * 따옴표("...", '...') 안의 세미콜론(Google Fonts wght@400;700 등), 괄호 안, 주석, @media 블록 안은 건드리지 않는다.
+ */
+export function hoistImports(css) {
+  const text = String(css ?? '');
+  if (!text || !/@(?:charset|import)\b/i.test(text)) {
+    return text;
+  }
+
+  const charsets = [];
+  const imports = [];
+  const bodyChunks = [];
+  const n = text.length;
+  let i = 0;
+  let bodyStart = 0;
+  let braceDepth = 0;
+
+  const skipComment = (pos) => {
+    const closeIdx = text.indexOf('*/', pos + 2);
+    return closeIdx === -1 ? n : closeIdx + 2;
+  };
+
+  const skipString = (pos) => {
+    const quote = text[pos];
+    let p = pos + 1;
+    while (p < n) {
+      if (text[p] === '\\') {
+        p += 2;
+        continue;
+      }
+      if (text[p] === quote) {
+        return p + 1;
+      }
+      p += 1;
+    }
+    return n;
+  };
+
+  const matchTopAtRule = (pos) => {
+    if (braceDepth !== 0 || text[pos] !== '@') return '';
+    const slice = text.slice(pos + 1, pos + 9).toLowerCase();
+    for (const kw of ['charset', 'import']) {
+      if (slice.startsWith(kw)) {
+        const after = text[pos + 1 + kw.length] || '';
+        if (!/[a-zA-Z0-9_-]/.test(after)) {
+          return kw;
+        }
+      }
+    }
+    return '';
+  };
+
+  while (i < n) {
+    const ch = text[i];
+
+    if (ch === '/' && text[i + 1] === '*') {
+      i = skipComment(i);
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipString(i);
+      continue;
+    }
+    if (ch === '{') {
+      braceDepth += 1;
+      i += 1;
+      continue;
+    }
+    if (ch === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+      i += 1;
+      continue;
+    }
+
+    const kind = matchTopAtRule(i);
+    if (kind) {
+      let p = i + 1 + kind.length;
+      let parenDepth = 0;
+      let foundSemi = -1;
+      let aborted = false;
+
+      while (p < n) {
+        const c = text[p];
+        if (c === '/' && text[p + 1] === '*') {
+          p = skipComment(p);
+          continue;
+        }
+        if (c === '"' || c === "'") {
+          p = skipString(p);
+          continue;
+        }
+        if (c === '(') {
+          parenDepth += 1;
+          p += 1;
+          continue;
+        }
+        if (c === ')') {
+          parenDepth = Math.max(0, parenDepth - 1);
+          p += 1;
+          continue;
+        }
+        if (c === '{' && parenDepth === 0) {
+          aborted = true;
+          break;
+        }
+        if (c === ';' && parenDepth === 0) {
+          foundSemi = p;
+          break;
+        }
+        p += 1;
+      }
+
+      if (!aborted && foundSemi !== -1) {
+        if (i > bodyStart) {
+          bodyChunks.push(text.slice(bodyStart, i));
+        }
+        const stmt = text.slice(i, foundSemi + 1).trim();
+        if (kind === 'charset') {
+          if (!charsets.includes(stmt)) charsets.push(stmt);
+        } else {
+          imports.push(stmt);
+        }
+        let nextPos = foundSemi + 1;
+        while (nextPos < n && (text[nextPos] === ' ' || text[nextPos] === '\t' || text[nextPos] === '\r' || text[nextPos] === '\n')) {
+          if (text[nextPos] === '\n') {
+            nextPos += 1;
+            break;
+          }
+          nextPos += 1;
+        }
+        i = nextPos;
+        bodyStart = nextPos;
+        continue;
+      }
+    }
+
+    i += 1;
+  }
+
+  if (charsets.length === 0 && imports.length === 0) {
+    return text;
+  }
+
+  if (bodyStart < n) {
+    bodyChunks.push(text.slice(bodyStart));
+  }
+
+  const body = bodyChunks.join('').replace(/^\s*\n/, '').trimEnd();
+  return [...charsets, ...imports, ...(body ? [body] : [])].join('\n');
+}
+
 const CONVERTED_TO_DIV_WARN_TAGS = new Set([
   'section', 'header', 'footer', 'article', 'aside', 'nav', 'main',
   'i', 'b', 'svg', 'tbody', 'thead', 'tfoot'
@@ -302,8 +477,17 @@ export function validateTheme(guiHTML, customCSS = '') {
   const errors = [];
   const warnings = [];
 
+  // CSS </style 차단 검사 (HTML이 없어도 항상 검사)
+  if (/<\/style/i.test(css)) {
+    errors.push('Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
+  }
+
   if (!html.trim()) {
-    errors.push('Custom HTML이 비어 있습니다. 최소한 <risutextbox></risutextbox>가 포함되어야 합니다.');
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings
+    };
   }
 
   // 자기 닫기 특수 슬롯 태그 검사
@@ -312,11 +496,6 @@ export function validateTheme(guiHTML, customCSS = '') {
   if (selfClosingMatches.length > 0) {
     const names = [...new Set(selfClosingMatches.map((m) => `<${m[1].toLowerCase()}/>`))].join(', ');
     errors.push(`특수 슬롯 태그는 자기 닫기(${names})를 사용할 수 없습니다. <tag></tag> 형태로 작성하세요.`);
-  }
-
-  // CSS </style 차단 검사
-  if (/<\/style/i.test(css)) {
-    errors.push('Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
   }
 
   // CBS 블록 짝 맞춤 검사
@@ -541,7 +720,8 @@ export function buildPreviewSrcdoc(preset, options = {}) {
     applyRegex = true
   } = options;
 
-  const guiHTML = String(preset?.guiHTML ?? '');
+  const rawGuiHTML = String(preset?.guiHTML ?? '');
+  const guiHTML = rawGuiHTML.trim() ? rawGuiHTML : FALLBACK_VANILLA_GUI_HTML;
   const safeCSS = String(preset?.customCSS ?? '').replace(/<\/style/gi, '');
   const rules = applyRegex && Array.isArray(preset?.regexRules) ? preset.regexRules : [];
 

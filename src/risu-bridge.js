@@ -1,6 +1,16 @@
 import { applyRegexRules } from './regex-engine.js';
-import { validateTheme } from './preview-engine.js';
-import { createPresetId, normalizePresetItem, normalizePluginState, savePluginState, isBuiltinId, findPreset } from './storage.js';
+import { validateTheme, hoistImports, sanitizeCssCommentText } from './preview-engine.js';
+import {
+    createPresetId,
+    normalizePresetItem,
+    normalizePluginState,
+    savePluginState,
+    isBuiltinId,
+    findPreset,
+    presetHasHtml,
+    presetHasCss,
+    hasPresetContent,
+} from './storage.js';
 
 const CUSTOM_TEXT_THEME_KEYS = [
     'FontColorStandard',
@@ -121,6 +131,89 @@ async function writeThemeToDatabase(api, patch) {
     }
 }
 
+export function computeNextAppliedIds(state, preset, overrides = null) {
+    const normalized = normalizePluginState(state);
+    const id = preset?.id;
+    if (!id) {
+        return [...normalized.appliedPresetIds];
+    }
+    if (!normalized.stackPresets) {
+        return [id];
+    }
+    const resolve = (pid) => {
+        if (pid === id) return preset;
+        return overrides instanceof Map && overrides.has(pid) ? overrides.get(pid) : findPreset(normalized, pid);
+    };
+    if (presetHasHtml(preset)) {
+        const kept = normalized.appliedPresetIds.filter((existingId) => {
+            if (existingId === id) return false;
+            const existing = resolve(existingId);
+            return existing ? !presetHasHtml(existing) : false;
+        });
+        return [id, ...kept];
+    }
+    if (normalized.appliedPresetIds.includes(id)) {
+        return [...normalized.appliedPresetIds];
+    }
+    return [...normalized.appliedPresetIds, id];
+}
+
+export function composeApplied(state, overrides = null) {
+    const normalized = normalizePluginState(state);
+    const presetsById = overrides?.presetsById instanceof Map ? overrides.presetsById : null;
+    const appliedIds = Array.isArray(overrides?.appliedPresetIds)
+        ? overrides.appliedPresetIds
+        : normalized.appliedPresetIds;
+    const resolve = (id) => (presetsById && presetsById.has(id) ? presetsById.get(id) : findPreset(normalized, id));
+    const resolved = appliedIds.map(resolve).filter(Boolean);
+
+    const slot0 = resolved[0] || null;
+    const hasHtml = Boolean(slot0 && presetHasHtml(slot0));
+    const backup = normalized.vanillaBackup;
+
+    const theme = hasHtml ? 'customHTML' : (backup?.theme ?? '');
+    const guiHTML = hasHtml ? slot0.guiHTML : (backup?.guiHTML ?? '');
+
+    const cssParts = resolved.filter((preset) => presetHasCss(preset));
+    let customCSS = '';
+    if (cssParts.length === 1) {
+        customCSS = cssParts[0].customCSS;
+    } else if (cssParts.length >= 2) {
+        const combined = cssParts
+            .map((preset) => `/* ── 프리셋: ${sanitizeCssCommentText(preset.name || '이름 없는 프리셋')} ── */\n${preset.customCSS}`)
+            .join('\n\n');
+        customCSS = hoistImports(combined);
+    }
+
+    const regexRules = [];
+    for (const preset of resolved) {
+        if (!Array.isArray(preset.regexRules)) {
+            continue;
+        }
+        for (const rule of preset.regexRules) {
+            if (
+                rule &&
+                rule.enabled !== false &&
+                (!rule.type || rule.type === 'editdisplay') &&
+                typeof rule.in === 'string' &&
+                rule.in !== ''
+            ) {
+                regexRules.push(rule);
+            }
+        }
+    }
+
+    return {
+        theme,
+        guiHTML,
+        customCSS,
+        regexRules,
+        hasHtml,
+        appliedPresets: resolved,
+        cssPartCount: cssParts.length,
+    };
+}
+
 export async function activatePreset(preset, state, options = {}, api = globalThis.risuai) {
     if (!preset || typeof preset !== 'object') {
         throw new Error('활성화할 프리셋이 올바르지 않습니다.');
@@ -130,6 +223,9 @@ export async function activatePreset(preset, state, options = {}, api = globalTh
     }
 
     const normalizedPreset = normalizePresetItem(preset);
+    if (!hasPresetContent(normalizedPreset)) {
+        throw new Error('HTML·CSS·정규식 중 하나는 채워야 적용할 수 있습니다.');
+    }
     const validation = validateTheme(normalizedPreset.guiHTML, normalizedPreset.customCSS);
     if (options.validate !== false && !options.force && !validation.valid) {
         throw new Error(`테마 검증 오류로 적용할 수 없습니다: ${validation.errors.join(' / ')}`);
@@ -142,6 +238,21 @@ export async function activatePreset(preset, state, options = {}, api = globalTh
         : baseState.presets.some((p) => p.id === normalizedPreset.id)
           ? baseState.presets.map((p) => (p.id === normalizedPreset.id ? { ...normalizedPreset, groupId: p.groupId } : p))
           : [...baseState.presets, normalizedPreset];
+
+    const previousIds = baseState.appliedPresetIds;
+    const oldSlot0 = previousIds[0] ? findPreset(baseState, previousIds[0]) : null;
+    const stateWithNextPresets = { ...baseState, presets: nextPresets };
+    const nextAppliedIds = computeNextAppliedIds(stateWithNextPresets, normalizedPreset);
+    const wasAlreadyApplied = previousIds.includes(normalizedPreset.id);
+    const replacedHtmlPreset =
+        baseState.stackPresets &&
+        presetHasHtml(normalizedPreset) &&
+        oldSlot0 &&
+        oldSlot0.id !== normalizedPreset.id &&
+        presetHasHtml(oldSlot0)
+            ? oldSlot0
+            : null;
+    const keptStackedCount = nextAppliedIds.length > 1 ? nextAppliedIds.length - 1 : 0;
 
     // 1) 바닐라 백업을 먼저 확보해 저장한다. DB를 덮어쓴 뒤에 저장이 실패하면 원본을 되찾을 수 없다.
     let vanillaBackup = baseState.vanillaBackup;
@@ -156,23 +267,33 @@ export async function activatePreset(preset, state, options = {}, api = globalTh
         await savePluginState({ ...baseState, vanillaBackup, presets: nextPresets }, api);
     }
 
+    const composed = composeApplied({
+        ...baseState,
+        vanillaBackup,
+        presets: nextPresets,
+        appliedPresetIds: nextAppliedIds,
+    });
+    if (options.validate !== false && !options.force && /<\/style/i.test(composed.customCSS)) {
+        throw new Error('합친 Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
+    }
+
     const textInfo = await readTextThemeSafely(api);
 
     // 2) 덮어쓰고 반영 여부를 확인한다.
     await writeThemeToDatabase(api, {
-        theme: 'customHTML',
-        guiHTML: normalizedPreset.guiHTML,
-        customCSS: normalizedPreset.customCSS,
+        theme: composed.theme,
+        guiHTML: composed.guiHTML,
+        customCSS: composed.customCSS,
     });
 
     const cssResult = await refreshHostCSS(api, textInfo);
 
-    // 3) 활성 프리셋을 기록한다.
+    // 3) 적용 목록을 기록한다.
     const saveResult = await savePluginState(
         {
             ...baseState,
             vanillaBackup,
-            activePresetId: normalizedPreset.id,
+            appliedPresetIds: nextAppliedIds,
             presets: nextPresets,
         },
         api,
@@ -183,6 +304,11 @@ export async function activatePreset(preset, state, options = {}, api = globalTh
         state: saveResult.state,
         preset: normalizedPreset,
         validation,
+        composed,
+        wasAlreadyApplied,
+        replacedHtmlPreset,
+        keptStackedCount,
+        addedStacked: baseState.stackPresets && !presetHasHtml(normalizedPreset) && !wasAlreadyApplied && nextAppliedIds.length > 1,
         cssRefreshed: cssResult.refreshed,
         cssRefreshInfo: cssResult,
     };
@@ -198,10 +324,10 @@ export async function restoreVanilla(state, api = globalThis.risuai) {
 
     // 백업이 없으면 플러그인이 덮어쓴 적이 없다는 뜻이다. 사용자의 현재 설정을 비우지 않는다.
     if (!backup) {
-        if (!baseState.activePresetId) {
+        if (baseState.appliedPresetIds.length === 0) {
             return { restored: false, hadBackup: false, state: baseState, cssRefreshed: false };
         }
-        const cleared = await savePluginState({ ...baseState, activePresetId: null }, api);
+        const cleared = await savePluginState({ ...baseState, appliedPresetIds: [] }, api);
         return { restored: false, hadBackup: false, state: cleared.state, cssRefreshed: false };
     }
 
@@ -218,7 +344,7 @@ export async function restoreVanilla(state, api = globalThis.risuai) {
     const saveResult = await savePluginState(
         {
             ...baseState,
-            activePresetId: null,
+            appliedPresetIds: [],
             vanillaBackup: null,
         },
         api,
@@ -228,6 +354,192 @@ export async function restoreVanilla(state, api = globalThis.risuai) {
         restored: true,
         hadBackup: true,
         state: saveResult.state,
+        cssRefreshed: cssResult.refreshed,
+    };
+}
+
+export async function deactivatePreset(presetId, state, api = globalThis.risuai) {
+    if (!api || typeof api.setDatabaseLite !== 'function') {
+        throw new Error('RisuAI setDatabaseLite API를 사용할 수 없습니다.');
+    }
+
+    const baseState = normalizePluginState(state);
+    if (!baseState.appliedPresetIds.includes(presetId)) {
+        return { deactivated: false, restoredVanilla: false, state: baseState, cssRefreshed: false };
+    }
+
+    const nextAppliedIds = baseState.appliedPresetIds.filter((id) => id !== presetId);
+    if (nextAppliedIds.length === 0) {
+        const restoreRes = await restoreVanilla(baseState, api);
+        return {
+            deactivated: true,
+            restoredVanilla: true,
+            hadBackup: restoreRes.hadBackup,
+            state: restoreRes.state,
+            cssRefreshed: restoreRes.cssRefreshed,
+        };
+    }
+
+    const nextState = { ...baseState, appliedPresetIds: nextAppliedIds };
+    const composed = composeApplied(nextState);
+    if (/<\/style/i.test(composed.customCSS)) {
+        throw new Error('합친 Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
+    }
+
+    const textInfo = await readTextThemeSafely(api);
+    await writeThemeToDatabase(api, {
+        theme: composed.theme,
+        guiHTML: composed.guiHTML,
+        customCSS: composed.customCSS,
+    });
+    const cssResult = await refreshHostCSS(api, textInfo);
+    const saveResult = await savePluginState(nextState, api);
+
+    return {
+        deactivated: true,
+        restoredVanilla: false,
+        state: saveResult.state,
+        composed,
+        cssRefreshed: cssResult.refreshed,
+    };
+}
+
+export async function setStackPresets(enabled, state, api = globalThis.risuai) {
+    const baseState = normalizePluginState(state);
+    const nextEnabled = Boolean(enabled);
+    if (nextEnabled === baseState.stackPresets) {
+        return {
+            changed: false,
+            droppedCount: 0,
+            keptPreset: baseState.appliedPresetIds[0] ? findPreset(baseState, baseState.appliedPresetIds[0]) : null,
+            state: baseState,
+            cssRefreshed: false,
+        };
+    }
+
+    if (nextEnabled || baseState.appliedPresetIds.length <= 1) {
+        const saveResult = await savePluginState({ ...baseState, stackPresets: nextEnabled }, api);
+        const keptId = saveResult.state.appliedPresetIds[0];
+        return {
+            changed: true,
+            droppedCount: 0,
+            keptPreset: keptId ? findPreset(saveResult.state, keptId) : null,
+            state: saveResult.state,
+            cssRefreshed: false,
+        };
+    }
+
+    if (!api || typeof api.setDatabaseLite !== 'function') {
+        throw new Error('RisuAI setDatabaseLite API를 사용할 수 없습니다.');
+    }
+
+    const keptId = baseState.appliedPresetIds[0];
+    const droppedCount = baseState.appliedPresetIds.length - 1;
+    const nextState = normalizePluginState({
+        ...baseState,
+        stackPresets: false,
+        appliedPresetIds: [keptId],
+    });
+    const composed = composeApplied(nextState);
+    if (/<\/style/i.test(composed.customCSS)) {
+        throw new Error('합친 Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
+    }
+
+    const textInfo = await readTextThemeSafely(api);
+    await writeThemeToDatabase(api, {
+        theme: composed.theme,
+        guiHTML: composed.guiHTML,
+        customCSS: composed.customCSS,
+    });
+    const cssResult = await refreshHostCSS(api, textInfo);
+    const saveResult = await savePluginState(nextState, api);
+
+    return {
+        changed: true,
+        droppedCount,
+        keptPreset: findPreset(saveResult.state, keptId),
+        state: saveResult.state,
+        cssRefreshed: cssResult.refreshed,
+    };
+}
+
+/**
+ * 삭제나 덮어쓰기 가져오기 뒤 적용 중이던 목록이 바뀌었으면 RisuAI DB까지 함께 맞춘다.
+ * 마지막 적용 프리셋까지 빠지면 바닐라로 복원한다. DB 쓰기에 실패하면 상태를 저장하지 않고 오류를 던진다.
+ */
+export async function syncAppliedStateToRisu(prevState, nextState, api = globalThis.risuai) {
+    const prevNormalized = normalizePluginState(prevState);
+    const nextNormalized = normalizePluginState(nextState);
+
+    if (prevNormalized.appliedPresetIds.length === 0) {
+        const saved = await savePluginState(nextNormalized, api);
+        return { dbUpdated: false, restoredVanilla: false, state: saved.state, cssRefreshed: false };
+    }
+
+    const prevComposed = composeApplied(prevNormalized);
+    const nextComposed = composeApplied(nextNormalized);
+    const sameIds =
+        prevNormalized.appliedPresetIds.length === nextNormalized.appliedPresetIds.length &&
+        prevNormalized.appliedPresetIds.every((id, idx) => id === nextNormalized.appliedPresetIds[idx]);
+    const sameOutput =
+        sameIds &&
+        prevComposed.theme === nextComposed.theme &&
+        prevComposed.guiHTML === nextComposed.guiHTML &&
+        prevComposed.customCSS === nextComposed.customCSS;
+
+    if (sameOutput) {
+        const saved = await savePluginState(nextNormalized, api);
+        return { dbUpdated: false, restoredVanilla: false, state: saved.state, cssRefreshed: false };
+    }
+
+    if (nextNormalized.appliedPresetIds.length === 0) {
+        const backup = prevNormalized.vanillaBackup;
+        if (!backup) {
+            const saved = await savePluginState({ ...nextNormalized, appliedPresetIds: [] }, api);
+            return { dbUpdated: false, restoredVanilla: false, state: saved.state, cssRefreshed: false };
+        }
+        if (!api || typeof api.setDatabaseLite !== 'function') {
+            throw new Error('RisuAI setDatabaseLite API를 사용할 수 없습니다.');
+        }
+        const textInfo = await readTextThemeSafely(api);
+        await writeThemeToDatabase(api, {
+            theme: backup.theme,
+            guiHTML: backup.guiHTML,
+            customCSS: backup.customCSS,
+        });
+        const cssResult = await refreshHostCSS(api, textInfo);
+        const saved = await savePluginState(
+            { ...nextNormalized, appliedPresetIds: [], vanillaBackup: null },
+            api,
+        );
+        return {
+            dbUpdated: true,
+            restoredVanilla: true,
+            state: saved.state,
+            cssRefreshed: cssResult.refreshed,
+        };
+    }
+
+    if (!api || typeof api.setDatabaseLite !== 'function') {
+        throw new Error('RisuAI setDatabaseLite API를 사용할 수 없습니다.');
+    }
+    if (/<\/style/i.test(nextComposed.customCSS)) {
+        throw new Error('합친 Custom CSS에 닫는 </style> 문자열이 포함되어 있습니다.');
+    }
+
+    const textInfo = await readTextThemeSafely(api);
+    await writeThemeToDatabase(api, {
+        theme: nextComposed.theme,
+        guiHTML: nextComposed.guiHTML,
+        customCSS: nextComposed.customCSS,
+    });
+    const cssResult = await refreshHostCSS(api, textInfo);
+    const saved = await savePluginState(nextNormalized, api);
+
+    return {
+        dbUpdated: true,
+        restoredVanilla: false,
+        state: saved.state,
         cssRefreshed: cssResult.refreshed,
     };
 }
@@ -278,24 +590,38 @@ export async function readDisplayRegexEnabled(api = globalThis.risuai) {
     }
 }
 
-/** 활성 프리셋에서 실제로 적용될 디스플레이 정규식 규칙만 고른다. */
+/** 적용된 프리셋들에서 실제로 적용될 디스플레이 정규식 규칙만 순서대로 고른다. */
 export function getActiveDisplayRules(state) {
-    if (!state || !state.activePresetId) {
+    if (!state) {
         return [];
     }
-    // 기본 제공 프리셋(코드)도 찾는다. 양쪽 프리셋은 디스플레이 정규식으로 반대편 이미지를 넣는다.
-    const activePreset = findPreset(state, state.activePresetId);
-    if (!activePreset || !Array.isArray(activePreset.regexRules)) {
+    const appliedIds = Array.isArray(state.appliedPresetIds)
+        ? state.appliedPresetIds
+        : typeof state.activePresetId === 'string' && state.activePresetId
+          ? [state.activePresetId]
+          : [];
+    if (appliedIds.length === 0) {
         return [];
     }
-    return activePreset.regexRules.filter(
-        (rule) =>
-            rule &&
-            rule.enabled !== false &&
-            (!rule.type || rule.type === 'editdisplay') &&
-            typeof rule.in === 'string' &&
-            rule.in !== '',
-    );
+    const rules = [];
+    for (const id of appliedIds) {
+        const activePreset = findPreset(state, id);
+        if (!activePreset || !Array.isArray(activePreset.regexRules)) {
+            continue;
+        }
+        for (const rule of activePreset.regexRules) {
+            if (
+                rule &&
+                rule.enabled !== false &&
+                (!rule.type || rule.type === 'editdisplay') &&
+                typeof rule.in === 'string' &&
+                rule.in !== ''
+            ) {
+                rules.push(rule);
+            }
+        }
+    }
+    return rules;
 }
 
 /**

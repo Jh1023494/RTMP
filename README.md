@@ -8,6 +8,12 @@ RisuAI 바닐라의 Custom HTML (`guiHTML`) 및 Custom CSS (`customCSS`)를 프�
   - 프리셋 적용 시 `risuai.setDatabaseLite({ theme: 'customHTML', guiHTML, customCSS })`를 통해 RisuAI 데이터베이스에 직접 기록하며, 첫 적용 직전의 바닐라 `theme / guiHTML / customCSS`를 플러그인 내부 저장소에 백업합니다.
   - `getTextTheme()` 확인 후 `changeTextTheme()` / `setCustomTextTheme()`를 재호출하여 `mainDom` 권한 없이도 호스트의 `<style id="customcss">`를 즉시 갱신합니다.
   - **플러그인 삭제 후에도 별도 후처리가 필요 없습니다.** 적용된 HTML/CSS는 RisuAI 자체 설정으로 남아 바닐라와 동일하게 동작하며, 삭제 전에 원하면 관리자 창 ⋯ 메뉴의 `원래 테마로 복원`으로 되돌릴 수 있습니다. 단, 프리셋의 디스플레이 정규식은 플러그인이 실행 중일 때만 적용되므로 삭제하면 함께 꺼집니다.
+- **프리셋 중복 적용 (선택 옵션)**
+  - `⋯` 메뉴의 **프리셋 중복 적용**을 켜면(기본값 꺼짐) HTML이 없는 CSS·정규식 전용 프리셋을 기존 테마 위에 순서대로 겹쳐 적용할 수 있습니다.
+  - HTML이 있는 프리셋은 항상 맨 앞(1번) 자리만 교체하며, 겹쳐 둔 CSS·정규식 프리셋은 그대로 남습니다.
+  - 2개 이상의 CSS 조각을 합칠 때는 각 조각에 구분 주석을 붙이고 `@charset`·`@import`를 맨 위로 모읍니다(CSS 조각이 1개뿐이면 원본 그대로 기록).
+  - HTML 없이 CSS만 적용하면 원래 RisuAI 테마·HTML 위에 쓰되 바닐라 `customCSS`는 포함하지 않으며, 겹친 CSS는 선택자 우선순위가 같거나 더 높아야(`!important` 포함 규칙 등) 기존 스타일을 덮어씁니다.
+  - 상단 `적용 중` 배지(모바일은 목록 상단 표시줄)나 편집 상단의 `적용 해제` 버튼으로 개별 해제할 수 있으며, 마지막 프리셋을 해제하면 바닐라 설정으로 복원합니다.
 - **실시간 샌드박스 미리보기**
   - RisuAI `Chat.svelte` 허용 태그/슬롯(`<risutextbox>`, `<risuicon>`, `<risubuttons>`, `<risugeninfo>`) 화이트리스트와 CBS 분기(`{{#when}}`)를 시뮬레이션하여 `<iframe sandbox="allow-same-origin">`에 실시간 렌더링합니다.
   - 다크/라이트 배색, 뷰포트 너비(`100%` / `520px` / `390px`), 역할 필터(`all` / `char` / `user` / `edit`), 커스텀 샘플 메시지 및 프리셋 정규식 반영 여부를 조절할 수 있습니다.

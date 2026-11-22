@@ -19,6 +19,9 @@ import {
     sanitizeAndRenderGuiHtml,
     validateTheme,
     buildPreviewSrcdoc,
+    hoistImports,
+    sanitizeCssCommentText,
+    FALLBACK_VANILLA_GUI_HTML,
 } from '../src/preview-engine.js';
 import {
     STORAGE_KEY_STATE,
@@ -31,15 +34,22 @@ import {
     movePresetToGroup,
     renameGroup,
     nextGroupName,
+    normalizePresetItem,
     normalizePluginState,
     getAllPresets,
     hideBuiltin,
     unhideBuiltins,
     presetFingerprint,
+    hasPresetContent,
 } from '../src/storage.js';
 import {
     getActiveDisplayRules,
     activatePreset,
+    deactivatePreset,
+    setStackPresets,
+    syncAppliedStateToRisu,
+    computeNextAppliedIds,
+    composeApplied,
     restoreVanilla,
     captureCurrentVanillaAsPreset,
     registerDisplayRegexHook,
@@ -292,14 +302,15 @@ test('Built-in presets: all valid, unique prefixes, and new ones reach existing 
         }),
     );
     const upgraded = await loadPluginState(mock.api);
-    assert.equal(upgraded.schemaVersion, 2);
+    assert.equal(upgraded.schemaVersion, 3);
     assert.deepEqual(
         upgraded.presets.map((p) => p.name),
         [`${cream.name} (수정)`, '내 것'],
     );
     assert.ok(upgraded.presets.every((p) => !BUILTIN_PRESETS.some((b) => b.id === p.id)));
     assert.deepEqual(upgraded.hiddenBuiltinIds, ['preset_book_night']);
-    assert.equal(upgraded.activePresetId, null); // 옛 기본 프리셋은 코드에 없으므로 적용 표시만 풀린다
+    assert.deepEqual(upgraded.appliedPresetIds, []); // 옛 기본 프리셋은 코드에 없으므로 적용 표시만 풀린다
+    assert.equal(upgraded.stackPresets, false);
     assert.equal(getAllPresets(upgraded).length, BUILTIN_PRESETS.length - 1 + 2);
 
     // 숨김은 저장되고, 되살릴 수 있다.
@@ -313,6 +324,7 @@ test('Built-in presets: all valid, unique prefixes, and new ones reach existing 
 
     // 코드에 있는 기본 제공 프리셋을 적용하면 그 정규식(양쪽 프리셋의 반대편 이미지)이 훅에 잡힌다.
     const pairState = normalizePluginState({ schemaVersion: 2, activePresetId: 'preset_messenger-pair_white', presets: [] });
+    assert.deepEqual(pairState.appliedPresetIds, ['preset_messenger-pair_white']);
     assert.equal(getActiveDisplayRules(pairState).length, 1);
     assert.equal(presetFingerprint(cream), presetFingerprint({ ...cream }));
 });
@@ -533,7 +545,7 @@ test('storage & risu-bridge: load/save, JSON import/export, activatePreset, #cus
     });
 
     const initialState = await loadPluginState(mock.api);
-    assert.equal(initialState.activePresetId, null);
+    assert.deepEqual(initialState.appliedPresetIds, []);
     assert.equal(getAllPresets(initialState).length, BUILTIN_PRESETS.length);
 
     const starter = getAllPresets(initialState)[0];
@@ -545,13 +557,13 @@ test('storage & risu-bridge: load/save, JSON import/export, activatePreset, #cus
     assert.equal(mock.db.guiHTML, starter.guiHTML);
     assert.equal(mock.db.customCSS, starter.customCSS);
     assert.equal(mock.calls.changeTextTheme.length, 1);
-    assert.equal(actRes.state.activePresetId, starter.id);
+    assert.deepEqual(actRes.state.appliedPresetIds, [starter.id]);
     assert.equal(actRes.state.vanillaBackup.guiHTML, '<div>orig-vanilla-html</div>');
     assert.equal(actRes.state.vanillaBackup.customCSS, '/* orig vanilla css */');
 
     // Re-load from pluginStorage and verify persistence
     const reloaded = await loadPluginState(mock.api);
-    assert.equal(reloaded.activePresetId, starter.id);
+    assert.deepEqual(reloaded.appliedPresetIds, [starter.id]);
     assert.ok(await mock.api.pluginStorage.getItem(STORAGE_KEY_STATE));
 
     // Also test setCustomTextTheme refresh branch when host uses textTheme === 'custom'
@@ -600,7 +612,7 @@ test('storage & risu-bridge: load/save, JSON import/export, activatePreset, #cus
 
     // 활성 프리셋에 적용할 규칙이 없어지면 훅을 해제하고, 다시 생기면 재등록한다.
     const stateWithRules = currentState;
-    currentState = { ...currentState, activePresetId: null };
+    currentState = { ...currentState, appliedPresetIds: [] };
     await hook.sync();
     assert.equal(hook.registered, false);
     assert.equal(mock.calls.removeRisuScriptHandler.length, 1);
@@ -626,7 +638,7 @@ test('storage & risu-bridge: load/save, JSON import/export, activatePreset, #cus
     assert.equal(mock.db.theme, '');
     assert.equal(mock.db.guiHTML, '<div>orig-vanilla-html</div>');
     assert.equal(mock.db.customCSS, '/* orig vanilla css */');
-    assert.equal(restored.state.activePresetId, null);
+    assert.deepEqual(restored.state.appliedPresetIds, []);
     assert.equal(restored.state.vanillaBackup, null);
 
     // Capture current vanilla as preset
@@ -745,7 +757,7 @@ test('risu-bridge: permission denial and missing backup never destroy vanilla se
     denyWrite.api.setDatabaseLite = async () => {};
     const s2 = await loadPluginState(denyWrite.api);
     await assert.rejects(() => activatePreset(preset, s2, {}, denyWrite.api), /쓰기 권한/);
-    assert.equal((await loadPluginState(denyWrite.api)).activePresetId, null);
+    assert.deepEqual((await loadPluginState(denyWrite.api)).appliedPresetIds, []);
     assert.equal(denyWrite.db.guiHTML, '<b>mine</b>');
 
     // 백업 없이 복원: 사용자의 현재 설정을 비우지 않는다.
@@ -855,4 +867,307 @@ test('프리셋 그룹: 묶기, 순서, 빼기, 하나 남으면 해제, 이름 
     const imported = importPresetsJson(bundle, fresh, 'merge').state;
     assert.equal(imported.groups.length, 1);
     assert.equal(imported.presets.filter((p) => p.groupId === imported.groups[0].id).length, 2);
+});
+
+test('프리셋 중복 적용(1.0.2): 빈 프리셋 입구 차단, hoistImports 스캐너, 주석 안전 처리', async () => {
+    // 1. hasPresetContent & normalizePresetItem & captureCurrentVanillaAsPreset
+    const emptyBlank = normalizePresetItem({ id: 'blank_1', name: '빈 것', guiHTML: '   ', customCSS: '\n', regexRules: [] });
+    assert.equal(emptyBlank.id, 'blank_1');
+    assert.equal(hasPresetContent(emptyBlank), false);
+    assert.equal(hasPresetContent({ ...emptyBlank, regexRules: [{ id: 'r', in: '   ', out: 'x' }] }), false);
+    assert.equal(hasPresetContent({ ...emptyBlank, regexRules: [{ id: 'r', in: 'foo', out: '', enabled: false }] }), true);
+    assert.equal(hasPresetContent({ ...emptyBlank, customCSS: '.a{}' }), true);
+
+    assert.equal(validateTheme('', '.a { color: red; }').valid, true);
+    assert.equal(validateTheme('', '.a{} </style>').valid, false);
+
+    // 빈 프리셋 적용 거절 + DB 미접근
+    const mock = createMockRisuApi();
+    const s0 = await loadPluginState(mock.api);
+    await assert.rejects(() => activatePreset(emptyBlank, s0, {}, mock.api), /하나/);
+    assert.equal(mock.calls.setDatabaseLite.length, 0);
+
+    // 바닐라 캡처는 빈 DB도 정상 동작
+    const emptyVanillaApi = createMockRisuApi({ theme: '', guiHTML: '', customCSS: '' });
+    const captured = await captureCurrentVanillaAsPreset('빈 바닐라', await loadPluginState(emptyVanillaApi.api), emptyVanillaApi.api);
+    assert.equal(captured.preset.name, '빈 바닐라');
+
+    // 가져오기: 빈 프리셋 건너뛰기, 전부 비면 오류, 정규식 전용 단일 객체 인식
+    assert.throws(() => importPresetsJson(JSON.stringify({ name: '빈것', guiHTML: '', customCSS: '' }), s0), /채워진/);
+    const rxOnlySingle = importPresetsJson(
+        JSON.stringify({ name: '정규식만', regexRules: [{ id: 'r1', in: 'A', out: 'B', flag: 'g' }] }),
+        s0,
+        'merge',
+    );
+    assert.equal(rxOnlySingle.importedCount, 1);
+
+    const mixedBundle = importPresetsJson(
+        JSON.stringify({
+            presets: [
+                { id: 'empty_one', name: 'E', guiHTML: '', customCSS: '' },
+                { id: 'css_one', name: 'C', guiHTML: '', customCSS: '.c{color:red;}' },
+            ],
+        }),
+        s0,
+        'merge',
+    );
+    assert.equal(mixedBundle.importedCount, 1);
+    assert.equal(mixedBundle.skippedEmptyCount, 1);
+
+    // 2. hoistImports: Google Fonts 따옴표 안 ;, @charset 최상단, 주석/문자열/@media 내부 무시
+    const sampleCss = [
+        '/* ── 프리셋: A ── */',
+        '.a { content: "@import \'ignored.css\';"; }',
+        '@media screen { /* @import "nested.css"; */ .m { color: red; } }',
+        '/* ── 프리셋: B ── */',
+        '@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap");',
+        '@charset "UTF-8";',
+        '.b { font-family: "Noto Sans KR"; }',
+    ].join('\n');
+    const hoisted = hoistImports(sampleCss);
+    const lines = hoisted.split('\n');
+    assert.equal(lines[0], '@charset "UTF-8";');
+    assert.equal(
+        lines[1],
+        '@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap");',
+    );
+    assert.ok(hoisted.includes('.a { content: "@import \'ignored.css\';"; }'));
+    assert.ok(hoisted.includes('/* @import "nested.css"; */'));
+
+    // 3. 구분 주석 이름 이스케이프 (*/, 줄바꿈, </style)
+    const safeName = sanitizeCssCommentText('위험 */ body{display:none} </style>\n줄바꿈');
+    assert.ok(!safeName.includes('*/'));
+    assert.ok(!safeName.includes('<'));
+    assert.ok(!safeName.includes('\n'));
+});
+
+test('프리셋 중복 적용(1.0.2): 토글 꺼짐/켜짐, CSS·정규식 순서, 해제·삭제·가져오기·미리보기 동기화', async () => {
+    const htmlA = {
+        id: 'html_a',
+        name: '테마 A',
+        guiHTML: '<div class="a"><risutextbox></risutextbox></div>',
+        customCSS: '@import url("https://example.com/a.css");\n.a { color: #111; }',
+        regexRules: [{ id: 'ra', comment: 'A1', in: 'X', out: 'X_A', type: 'editdisplay', flag: 'g', ableFlag: true, enabled: true }],
+    };
+    const htmlB = {
+        id: 'html_b',
+        name: '테마 B',
+        guiHTML: '<div class="b"><risutextbox></risutextbox></div>',
+        customCSS: '.b { color: #222; }',
+        regexRules: [],
+    };
+    const cssFont = {
+        id: 'css_font',
+        name: '글꼴 */ 조각',
+        guiHTML: '',
+        customCSS: '@import url("https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap");\nbody { font-size: 16px; }',
+        regexRules: [{ id: 'rf', comment: 'F1', in: 'Y', out: 'Y_F', type: 'editdisplay', flag: 'g', ableFlag: true, enabled: true }],
+    };
+    const cssPad = {
+        id: 'css_pad',
+        name: '여백 조각',
+        guiHTML: '',
+        customCSS: '.pad { padding: 12px; }',
+        regexRules: [
+            { id: 'rp', comment: 'P_hi', in: 'TOKEN_A', out: 'HI_STEP', type: 'editdisplay', flag: 'g<order 5>', ableFlag: true, enabled: true },
+            { id: 'rp_tie', comment: 'P_tie', in: 'Y_F', out: 'Y_F_TIE', type: 'editdisplay', flag: 'g', ableFlag: true, enabled: true },
+        ],
+    };
+    const rxOnly = {
+        id: 'rx_only',
+        name: '정규식 조각',
+        guiHTML: '',
+        customCSS: '   ',
+        regexRules: [{ id: 'ro', comment: 'O1', in: 'Z', out: 'Z_O', type: 'editdisplay', flag: 'g', ableFlag: true, enabled: true }],
+    };
+
+    const mock = createMockRisuApi({
+        theme: 'waifu',
+        guiHTML: '<div>orig-vanilla</div>',
+        customCSS: '/* orig-vanilla-css */',
+    });
+
+    let state = normalizePluginState({
+        presets: [htmlA, htmlB, cssFont, cssPad, rxOnly],
+        appliedPresetIds: [],
+        stackPresets: false,
+    });
+
+    // 1. 토글 꺼짐: CSS 전용 적용 시 바닐라 테마/HTML + 해당 CSS만 쓰고 바닐라 CSS는 넣지 않는다.
+    let res = await activatePreset(cssFont, state, {}, mock.api);
+    state = res.state;
+    assert.deepEqual(state.appliedPresetIds, ['css_font']);
+    assert.equal(mock.db.theme, 'waifu');
+    assert.equal(mock.db.guiHTML, '<div>orig-vanilla</div>');
+    assert.equal(mock.db.customCSS, cssFont.customCSS); // 단일 조각이므로 주석/hoist 없음
+
+    // 토글 꺼짐에서 HTML 적용 시 전부 교체
+    res = await activatePreset(htmlA, state, {}, mock.api);
+    state = res.state;
+    assert.deepEqual(state.appliedPresetIds, ['html_a']);
+    assert.equal(mock.db.theme, 'customHTML');
+    assert.equal(mock.db.customCSS, htmlA.customCSS);
+
+    // 2. 토글 켜기 (겹친 게 1개 이하 → DB 쓰기 없음)
+    const beforeCalls = mock.calls.setDatabaseLite.length;
+    let tog = await setStackPresets(true, state, mock.api);
+    state = tog.state;
+    assert.equal(tog.changed, true);
+    assert.equal(mock.calls.setDatabaseLite.length, beforeCalls);
+
+    // 정규식 전용만 겹치면 CSS 조각은 여전히 1개 → 1.0.1과 출력 동일(주석 없음)
+    res = await activatePreset(rxOnly, state, {}, mock.api);
+    state = res.state;
+    assert.deepEqual(state.appliedPresetIds, ['html_a', 'rx_only']);
+    assert.equal(mock.db.customCSS, htmlA.customCSS);
+
+    // CSS 조각 추가 → 2개 이상이 되어 주석 + hoistImports 적용
+    res = await activatePreset(cssFont, state, {}, mock.api);
+    state = res.state;
+    assert.deepEqual(state.appliedPresetIds, ['html_a', 'rx_only', 'css_font']);
+    assert.ok(mock.db.customCSS.startsWith('@import url("https://example.com/a.css");\n@import url("https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&display=swap");'));
+    assert.ok(mock.db.customCSS.includes('/* ── 프리셋: 글꼴 * / 조각 ── */'));
+    assert.ok(!mock.db.customCSS.includes('/* ── 프리셋: 정규식 조각 ── */'));
+
+    // CSS 조각 하나 더 추가 → 정규식 <order> 우선 + 동순위 적용 순서 확인
+    res = await activatePreset(cssPad, state, {}, mock.api);
+    state = res.state;
+    assert.deepEqual(state.appliedPresetIds, ['html_a', 'rx_only', 'css_font', 'css_pad']);
+
+    const hook = await registerDisplayRegexHook(() => state, mock.api);
+    // html_a(order 0): X -> X_A, css_font(order 0): Y -> Y_F, css_pad(order 5): TOKEN_A -> HI_STEP, css_pad(order 0): Y_F -> Y_F_TIE (동순위는 적용 순서)
+    assert.equal(await hook.handler('X Y Z'), 'X_A Y_F_TIE Z_O');
+    assert.equal(await hook.handler('TOKEN_A Y'), 'HI_STEP Y_F_TIE');
+
+    // HTML B로 교체: 0번만 바뀌고 겹친 조각 유지
+    res = await activatePreset(htmlB, state, {}, mock.api);
+    state = res.state;
+    assert.equal(res.replacedHtmlPreset.id, 'html_a');
+    assert.equal(res.keptStackedCount, 3);
+    assert.deepEqual(state.appliedPresetIds, ['html_b', 'rx_only', 'css_font', 'css_pad']);
+    assert.equal(mock.db.guiHTML, htmlB.guiHTML);
+
+    // 이미 적용된 CSS 조각 다시 적용: 자리 유지
+    res = await activatePreset(cssFont, state, {}, mock.api);
+    state = res.state;
+    assert.equal(res.wasAlreadyApplied, true);
+    assert.deepEqual(state.appliedPresetIds, ['html_b', 'rx_only', 'css_font', 'css_pad']);
+
+    // 3. CSS 조각 먼저 적용 후 HTML 나중에 적용해도 0번으로 고정
+    state = (await restoreVanilla(state, mock.api)).state;
+    assert.deepEqual(state.appliedPresetIds, []);
+    state = (await activatePreset(cssFont, state, {}, mock.api)).state;
+    state = (await activatePreset(htmlA, state, {}, mock.api)).state;
+    assert.deepEqual(state.appliedPresetIds, ['html_a', 'css_font']);
+
+    // CSS 조각이던 것을 HTML 채워서 다시 적용하면 0번으로 이동 + 기존 HTML 교체
+    const cssFontWithHtml = { ...cssFont, guiHTML: '<div>promoted<risutextbox></risutextbox></div>' };
+    state = (await activatePreset(cssFontWithHtml, state, {}, mock.api)).state;
+    assert.deepEqual(state.appliedPresetIds, ['css_font']);
+    assert.equal(mock.db.guiHTML, cssFontWithHtml.guiHTML);
+
+    // 4. 해제 테스트 & 마지막 해제 시 바닐라 복원
+    state = (await activatePreset(cssPad, state, {}, mock.api)).state;
+    assert.deepEqual(state.appliedPresetIds, ['css_font', 'css_pad']);
+    let deact = await deactivatePreset('css_font', state, mock.api);
+    state = deact.state;
+    assert.equal(deact.restoredVanilla, false);
+    assert.deepEqual(state.appliedPresetIds, ['css_pad']);
+    assert.equal(mock.db.theme, 'waifu');
+    assert.equal(mock.db.guiHTML, '<div>orig-vanilla</div>');
+    assert.equal(mock.db.customCSS, cssPad.customCSS);
+
+    deact = await deactivatePreset('css_pad', state, mock.api);
+    state = deact.state;
+    assert.equal(deact.restoredVanilla, true);
+    assert.deepEqual(state.appliedPresetIds, []);
+    assert.equal(mock.db.theme, 'waifu');
+    assert.equal(mock.db.guiHTML, '<div>orig-vanilla</div>');
+    assert.equal(mock.db.customCSS, '/* orig-vanilla-css */');
+
+    // 백업 없이 복원해도 appliedPresetIds는 비움
+    const orphanState = { ...state, vanillaBackup: null, appliedPresetIds: ['css_pad'] };
+    const orphanRes = await restoreVanilla(orphanState, mock.api);
+    assert.deepEqual(orphanRes.state.appliedPresetIds, []);
+
+    // 5. 토글 켰다 끌 때: 0번만 남음, 1개 이하일 때는 DB 쓰기 생략
+    state = (await activatePreset(htmlA, state, {}, mock.api)).state;
+    state = (await activatePreset(cssPad, state, {}, mock.api)).state;
+    tog = await setStackPresets(false, state, mock.api);
+    state = tog.state;
+    assert.equal(tog.droppedCount, 1);
+    assert.equal(tog.keptPreset.id, 'html_a');
+    assert.deepEqual(state.appliedPresetIds, ['html_a']);
+    assert.equal(mock.db.customCSS, htmlA.customCSS);
+
+    const callsBeforeOn = mock.calls.setDatabaseLite.length;
+    tog = await setStackPresets(true, state, mock.api);
+    state = tog.state;
+    tog = await setStackPresets(false, state, mock.api);
+    state = tog.state;
+    assert.equal(tog.droppedCount, 0);
+    assert.equal(mock.calls.setDatabaseLite.length, callsBeforeOn);
+
+    // 6. 삭제·덮어쓰기 가져오기·숨김 동기화
+    state = (await setStackPresets(true, state, mock.api)).state;
+    state = (await activatePreset(cssPad, state, {}, mock.api)).state;
+    const afterDeleteCssPad = {
+        ...state,
+        presets: state.presets.filter((p) => p.id !== 'css_pad'),
+        appliedPresetIds: state.appliedPresetIds.filter((id) => id !== 'css_pad'),
+    };
+    const syncDel = await syncAppliedStateToRisu(state, afterDeleteCssPad, mock.api);
+    state = syncDel.state;
+    assert.equal(syncDel.dbUpdated, true);
+    assert.equal(syncDel.restoredVanilla, false);
+    assert.equal(mock.db.customCSS, htmlA.customCSS);
+
+    // 마지막 적용 프리셋을 덮어쓰기 가져오기로 빼면 바닐라 복원
+    const importedReplace = importPresetsJson(
+        JSON.stringify({ presets: [{ id: 'other_1', name: '다른것', guiHTML: '', customCSS: '.o{}' }] }),
+        state,
+        'replace',
+    );
+    const syncImp = await syncAppliedStateToRisu(state, importedReplace.state, mock.api);
+    state = syncImp.state;
+    assert.equal(syncImp.restoredVanilla, true);
+    assert.equal(mock.db.customCSS, '/* orig-vanilla-css */');
+
+    // 기본 제공 프리셋 숨김은 appliedPresetIds를 유지
+    const builtinId = BUILTIN_PRESETS[0].id;
+    state = (await activatePreset(BUILTIN_PRESETS[0], state, {}, mock.api)).state;
+    state = hideBuiltin(state, builtinId);
+    assert.deepEqual(state.appliedPresetIds, [builtinId]);
+
+    // 7. v2 -> v3 마이그레이션은 hiddenBuiltinIds·expandedBuiltinGroups를 보존
+    const v2Raw = {
+        schemaVersion: 2,
+        activePresetId: 'html_a',
+        vanillaBackup: null,
+        groups: [],
+        presets: [htmlA],
+        hiddenBuiltinIds: [builtinId],
+        expandedBuiltinGroups: ['소설 읽기'],
+    };
+    const v3Migrated = normalizePluginState(v2Raw);
+    assert.equal(v3Migrated.schemaVersion, 3);
+    assert.deepEqual(v3Migrated.appliedPresetIds, ['html_a']);
+    assert.deepEqual(v3Migrated.hiddenBuiltinIds, [builtinId]);
+    assert.deepEqual(v3Migrated.expandedBuiltinGroups, ['소설 읽기']);
+
+    // 8. 미리보기 합성 결과가 실제 적용 결과와 일치 (토글 꺼짐/켜짐·미저장 초안)
+    const unsavedCss = { ...cssPad, customCSS: '.pad { padding: 99px; }' };
+    const overrides = new Map([[unsavedCss.id, unsavedCss]]);
+    const stateOn = normalizePluginState({ presets: [htmlA, cssPad], appliedPresetIds: ['html_a'], stackPresets: true });
+    const virtualIds = computeNextAppliedIds(stateOn, unsavedCss, overrides);
+    const previewComposed = composeApplied(stateOn, { appliedPresetIds: virtualIds, presetsById: overrides });
+    assert.ok(previewComposed.customCSS.includes('padding: 99px'));
+    assert.ok(previewComposed.guiHTML.includes(htmlA.guiHTML));
+
+    // HTML 없는 CSS 단독 미리보기는 기본 틀 사용
+    const soloCssDoc = buildPreviewSrcdoc({ guiHTML: '', customCSS: cssPad.customCSS, regexRules: [] });
+    assert.ok(soloCssDoc.includes('risu-vanilla-fallback'));
+    assert.ok(soloCssDoc.includes('.pad { padding: 12px; }'));
+
+    await hook.dispose();
 });

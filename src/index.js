@@ -1,6 +1,9 @@
 import { loadPluginState } from './storage.js';
 import {
     activatePreset,
+    deactivatePreset,
+    setStackPresets,
+    syncAppliedStateToRisu,
     restoreVanilla,
     captureCurrentVanillaAsPreset,
     getVanillaState,
@@ -47,6 +50,9 @@ export async function initRisuThemePresetPlugin(api = globalThis.risuai) {
         setState,
         bridge: {
             activatePreset,
+            deactivatePreset,
+            setStackPresets,
+            syncAppliedStateToRisu,
             restoreVanilla,
             captureCurrentVanillaAsPreset,
             getVanillaState,

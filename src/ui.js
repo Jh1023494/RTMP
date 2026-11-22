@@ -21,6 +21,10 @@ import {
     unhideBuiltins,
     setBuiltinGroupExpanded,
     makeUserCopyOfBuiltin,
+    presetHasHtml,
+    presetHasCss,
+    presetHasRegex,
+    hasPresetContent,
 } from './storage.js';
 import {
     createRegexRuleId,
@@ -29,10 +33,15 @@ import {
     importRisuRegexJson,
     exportRisuRegexJson,
 } from './regex-engine.js';
-import { validateTheme, buildPreviewSrcdoc } from './preview-engine.js';
+import { validateTheme, buildPreviewSrcdoc, FALLBACK_VANILLA_GUI_HTML } from './preview-engine.js';
 import { HELP_COPY } from './help-copy.js';
 import {
     activatePreset,
+    deactivatePreset,
+    setStackPresets,
+    syncAppliedStateToRisu,
+    composeApplied,
+    computeNextAppliedIds,
     restoreVanilla,
     captureCurrentVanillaAsPreset,
     getVanillaState,
@@ -221,6 +230,125 @@ const UI_CSS = `
 .rtpv3-badge.active { background: rgba(46, 160, 67, 0.16); border-color: var(--rtpv3-ok); color: var(--rtpv3-ok-text); }
 .rtpv3-badge.warn { background: rgba(210, 153, 34, 0.16); border-color: var(--rtpv3-warn); color: var(--rtpv3-warn-text); }
 .rtpv3-badge.err { background: rgba(248, 81, 73, 0.16); border-color: var(--rtpv3-danger); color: #ff9c94; }
+
+.rtpv3-applied-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+}
+#${UI_ROOT_ID} button.rtpv3-header-badge {
+    cursor: pointer;
+    min-height: 24px;
+    padding: 2px 10px;
+}
+#${UI_ROOT_ID} button.rtpv3-header-badge:hover {
+    background: rgba(46, 160, 67, 0.25);
+    border-color: var(--rtpv3-ok);
+}
+.rtpv3-applied-popover {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: calc(100% + 6px);
+    z-index: 65;
+    width: min(360px, calc(100vw - 28px));
+    padding: 8px;
+    background: var(--rtpv3-surface-2);
+    border: 1px solid var(--rtpv3-border);
+    border-radius: var(--rtpv3-radius);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    flex-direction: column;
+    gap: 6px;
+}
+.rtpv3-applied-popover.open { display: flex; }
+.rtpv3-applied-pop-head {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--rtpv3-muted);
+    padding: 2px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.rtpv3-applied-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: var(--rtpv3-radius-sm);
+    background: var(--rtpv3-surface);
+    border: 1px solid var(--rtpv3-border-soft);
+    min-width: 0;
+}
+.rtpv3-applied-order {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--rtpv3-ok-text);
+    background: rgba(46, 160, 67, 0.16);
+    border: 1px solid rgba(46, 160, 67, 0.45);
+    border-radius: 999px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}
+#${UI_ROOT_ID} button.rtpv3-applied-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+    background: transparent;
+    border-color: transparent;
+    padding: 2px 4px;
+    min-height: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+#${UI_ROOT_ID} button.rtpv3-applied-name:hover:not(:disabled) {
+    background: var(--rtpv3-hover);
+    border-color: transparent;
+}
+.rtpv3-applied-pop-foot {
+    padding-top: 4px;
+    border-top: 1px solid var(--rtpv3-border-soft);
+    display: flex;
+    justify-content: flex-end;
+}
+.rtpv3-mobile-applied {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 7px 9px;
+    background: var(--rtpv3-surface);
+    border: 1px solid rgba(46, 160, 67, 0.45);
+    border-radius: var(--rtpv3-radius);
+}
+#${UI_ROOT_ID} button.rtpv3-mobile-applied-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: transparent;
+    border-color: transparent;
+    padding: 2px;
+    min-height: 24px;
+    text-align: left;
+    color: var(--rtpv3-ok-text);
+    font-weight: 600;
+}
+.rtpv3-mobile-applied-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+@media (max-width: 760px) {
+    .rtpv3-mobile-applied { display: flex; }
+}
 
 /* 모바일 화면 전환 탭 */
 .rtpv3-mobile-nav {
@@ -436,6 +564,17 @@ const UI_CSS = `
     border: 1px solid rgba(0, 0, 0, 0.28);
 }
 .rtpv3-preset-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtpv3-kind-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.rtpv3-kind-pill {
+    font-size: 10px;
+    line-height: 1.3;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--rtpv3-border-soft);
+    background: var(--rtpv3-bg-sunken);
+    color: var(--rtpv3-muted);
+    font-weight: 600;
+}
 .rtpv3-dirty-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rtpv3-warn); flex-shrink: 0; }
 .rtpv3-preset-desc {
     font-size: 11px;
@@ -592,6 +731,29 @@ const UI_CSS = `
 }
 #${UI_ROOT_ID} .rtpv3-menu-item:hover:not(:disabled) { background: var(--rtpv3-hover); border-color: transparent; }
 #${UI_ROOT_ID} .rtpv3-menu-item.danger-text { color: var(--rtpv3-danger-text); }
+#${UI_ROOT_ID} .rtpv3-menu-check { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rtpv3-menu-state {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--rtpv3-border);
+    color: var(--rtpv3-muted);
+    flex-shrink: 0;
+}
+.rtpv3-menu-state.on {
+    background: rgba(108, 140, 255, 0.18);
+    border-color: var(--rtpv3-accent);
+    color: #cfe0ff;
+}
+.rtpv3-menu-sub {
+    font-size: 10px;
+    color: var(--rtpv3-muted);
+    font-weight: 400;
+    padding: 0 8px 4px;
+    line-height: 1.45;
+    white-space: normal;
+}
 
 /* 탭과 세그먼트 */
 .rtpv3-tabs, .rtpv3-segment {
@@ -1034,6 +1196,9 @@ export function createPluginUI({
 
     const bridgeOps = {
         activatePreset: bridge.activatePreset || activatePreset,
+        deactivatePreset: bridge.deactivatePreset || deactivatePreset,
+        setStackPresets: bridge.setStackPresets || setStackPresets,
+        syncAppliedStateToRisu: bridge.syncAppliedStateToRisu || syncAppliedStateToRisu,
         restoreVanilla: bridge.restoreVanilla || restoreVanilla,
         captureCurrentVanillaAsPreset: bridge.captureCurrentVanillaAsPreset || captureCurrentVanillaAsPreset,
         getVanillaState: bridge.getVanillaState || getVanillaState,
@@ -1049,6 +1214,8 @@ export function createPluginUI({
         activeTab: 'editor',
         mobileView: typeof window !== 'undefined' && window.innerWidth <= 760 ? 'list' : 'editor',
         menuOpen: false,
+        appliedPopoverOpen: false,
+        mobileAppliedOpen: false,
         helpMode: false,
         previewWidth: '100%',
         previewWide: false,
@@ -1109,7 +1276,7 @@ export function createPluginUI({
             uiState.hasUnsavedDraft = false;
             return;
         }
-        const preferredId = uiState.selectedPresetId || state.activePresetId || all[0].id;
+        const preferredId = uiState.selectedPresetId || state.appliedPresetIds[0] || all[0].id;
         const found = all.find((p) => p.id === preferredId) || all[0];
         if (!uiState.draftPreset || uiState.selectedPresetId !== found.id) {
             uiState.selectedPresetId = found.id;
@@ -1217,19 +1384,22 @@ export function createPluginUI({
         if (!box) {
             return;
         }
-        const validation = validateTheme(uiState.draftPreset.guiHTML, uiState.draftPreset.customCSS);
+        const draft = uiState.draftPreset;
+        const validation = validateTheme(draft.guiHTML, draft.customCSS);
         box.innerHTML = '';
 
         const header = el('div', { className: 'rtpv3-row rtpv3-wrap' });
-        if (!uiState.draftPreset.guiHTML.trim() && !uiState.draftPreset.customCSS.trim()) {
-            header.appendChild(el('span', { className: 'rtpv3-badge', text: 'HTML·CSS가 비어 있음' }));
+        if (!hasPresetContent(draft)) {
+            header.appendChild(el('span', { className: 'rtpv3-badge', text: 'HTML·CSS·정규식 중 하나는 채워야 합니다.' }));
+        } else if (!validation.valid) {
+            header.appendChild(el('span', { className: 'rtpv3-badge err', text: `오류 ${validation.errors.length}건` }));
+        } else if (!presetHasHtml(draft)) {
+            const hasCss = presetHasCss(draft);
+            const hasRx = presetHasRegex(draft);
+            const kindText = hasCss && hasRx ? 'CSS · 정규식 프리셋' : hasCss ? 'CSS 전용 프리셋' : '정규식 전용 프리셋';
+            header.appendChild(el('span', { className: 'rtpv3-badge active', text: kindText }));
         } else {
-            header.appendChild(
-                el('span', {
-                    className: `rtpv3-badge ${validation.valid ? 'active' : 'err'}`,
-                    text: validation.valid ? '검증 통과' : `오류 ${validation.errors.length}건`,
-                }),
-            );
+            header.appendChild(el('span', { className: 'rtpv3-badge active', text: '검증 통과' }));
         }
         if (validation.warnings.length > 0) {
             header.appendChild(el('span', { className: 'rtpv3-badge warn', text: `경고 ${validation.warnings.length}건` }));
@@ -1320,7 +1490,48 @@ export function createPluginUI({
             return;
         }
         layoutPreviewFrame();
-        const srcdoc = buildPreviewSrcdoc(uiState.draftPreset, {
+
+        const state = normalizePluginState(getState());
+        const draft = uiState.draftPreset;
+        let previewPreset = { guiHTML: FALLBACK_VANILLA_GUI_HTML, customCSS: '', regexRules: [] };
+        let isApprox = true;
+
+        if (hasPresetContent(draft)) {
+            const presetsById = new Map([[draft.id, draft]]);
+            const virtualAppliedIds = computeNextAppliedIds(state, draft, presetsById);
+            const composed = composeApplied(state, { appliedPresetIds: virtualAppliedIds, presetsById });
+            const hasSavedCustomVanilla =
+                state.vanillaBackup?.theme === 'customHTML' && Boolean(state.vanillaBackup.guiHTML.trim());
+            if (composed.hasHtml) {
+                previewPreset = {
+                    guiHTML: composed.guiHTML,
+                    customCSS: composed.customCSS,
+                    regexRules: composed.regexRules,
+                };
+                isApprox = false;
+            } else if (hasSavedCustomVanilla) {
+                previewPreset = {
+                    guiHTML: state.vanillaBackup.guiHTML,
+                    customCSS: composed.customCSS,
+                    regexRules: composed.regexRules,
+                };
+                isApprox = false;
+            } else {
+                previewPreset = {
+                    guiHTML: FALLBACK_VANILLA_GUI_HTML,
+                    customCSS: composed.customCSS,
+                    regexRules: composed.regexRules,
+                };
+                isApprox = true;
+            }
+        }
+
+        const approxBadge = rootEl.querySelector('[data-role="preview-approx-badge"]');
+        if (approxBadge) {
+            approxBadge.style.display = isApprox ? 'inline-flex' : 'none';
+        }
+
+        const srcdoc = buildPreviewSrcdoc(previewPreset, {
             palette: uiState.previewPalette,
             backdrop: uiState.previewBackdrop,
             roleFilter: uiState.previewRoleFilter,
@@ -1352,6 +1563,9 @@ export function createPluginUI({
     async function saveDraftToState() {
         const currentState = normalizePluginState(getState());
         const named = { ...uiState.draftPreset, name: (uiState.draftPreset.name || '').trim() || '이름 없는 프리셋' };
+        if (!hasPresetContent(named)) {
+            throw new Error('HTML·CSS·정규식 중 하나는 채워야 합니다.');
+        }
         // 기본 제공 프리셋은 원본을 두고 사용자 프리셋으로 복사본을 만든다.
         const draft = isDraftBuiltin()
             ? makeUserCopyOfBuiltin(named)
@@ -1416,7 +1630,19 @@ export function createPluginUI({
                 uiState.hasUnsavedDraft = false;
                 uiState.draftIsNew = false;
             }
-            showToast(`"${result.preset.name}"을(를) RisuAI에 적용했습니다.${result.cssRefreshed ? '' : '\n화면에 바로 보이지 않으면 채팅을 다시 열어 주세요.'}`);
+            let message;
+            if (result.replacedHtmlPreset) {
+                const keptNote =
+                    result.keptStackedCount > 0 ? ` 겹쳐 둔 프리셋 ${result.keptStackedCount}개는 그대로입니다.` : '';
+                message = `"${result.replacedHtmlPreset.name}" 대신 "${result.preset.name}"을(를) 적용했습니다.${keptNote}`;
+            } else if (result.addedStacked) {
+                message = `"${result.preset.name}"을(를) 겹쳐 적용했습니다.`;
+            } else if (result.wasAlreadyApplied) {
+                message = `"${result.preset.name}"을(를) RisuAI에 다시 적용했습니다.`;
+            } else {
+                message = `"${result.preset.name}"을(를) RisuAI에 적용했습니다.`;
+            }
+            showToast(`${message}${result.cssRefreshed ? '' : '\n화면에 바로 보이지 않으면 채팅을 다시 열어 주세요.'}`);
             render();
         } catch (err) {
             const msg = errorText(err);
@@ -1429,6 +1655,52 @@ export function createPluginUI({
                 return;
             }
             showToast(`적용 실패: ${msg}`, true);
+        }
+    }
+
+    async function handleDeactivatePreset(presetId) {
+        try {
+            const currentState = normalizePluginState(getState());
+            const target = findPreset(currentState, presetId);
+            const result = await bridgeOps.deactivatePreset(presetId, currentState, api);
+            if (!result.deactivated) {
+                return;
+            }
+            setState(result.state);
+            if (result.restoredVanilla) {
+                showToast(
+                    result.hadBackup
+                        ? '마지막 프리셋을 해제해 원래 RisuAI 테마로 복원했습니다.'
+                        : `"${target?.name || '프리셋'}" 적용을 해제했습니다.`,
+                );
+            } else {
+                showToast(
+                    `"${target?.name || '프리셋'}" 적용을 해제했습니다.${result.cssRefreshed ? '' : '\n화면에 바로 보이지 않으면 채팅을 다시 열어 주세요.'}`,
+                );
+            }
+            render();
+        } catch (err) {
+            showToast(`해제 실패: ${errorText(err)}`, true);
+        }
+    }
+
+    async function handleToggleStackPresets(nextEnabled) {
+        try {
+            const currentState = normalizePluginState(getState());
+            const result = await bridgeOps.setStackPresets(nextEnabled, currentState, api);
+            setState(result.state);
+            if (nextEnabled) {
+                showToast('프리셋 중복 적용을 켰습니다. CSS·정규식 프리셋을 테마 위에 겹쳐 적용할 수 있습니다.');
+            } else if (result.droppedCount > 0) {
+                showToast(
+                    `겹쳐 둔 프리셋 ${result.droppedCount}개를 해제하고 "${result.keptPreset?.name || '기존 프리셋'}"만 남겼습니다.`,
+                );
+            } else {
+                showToast('프리셋 중복 적용을 껐습니다.');
+            }
+            render();
+        } catch (err) {
+            showToast(`설정 변경 실패: ${errorText(err)}`, true);
         }
     }
 
@@ -1556,13 +1828,19 @@ export function createPluginUI({
             const remaining = currentState.presets.filter((p) => p.id !== target.id);
             const nextState = normalizePluginState({
                 ...currentState,
-                activePresetId: currentState.activePresetId === target.id ? null : currentState.activePresetId,
+                appliedPresetIds: currentState.appliedPresetIds.filter((id) => id !== target.id),
                 presets: remaining,
             });
-            const { state: savedState } = await savePluginState(nextState, api);
-            setState(savedState);
-            selectFallbackAfterRemoval(savedState);
-            showToast(`"${target.name}"을(를) 삭제했습니다.`);
+            const syncRes = await bridgeOps.syncAppliedStateToRisu(currentState, nextState, api);
+            setState(syncRes.state);
+            selectFallbackAfterRemoval(syncRes.state);
+            if (syncRes.restoredVanilla) {
+                showToast(`"${target.name}"을(를) 삭제하고 원래 RisuAI 테마로 복원했습니다.`);
+            } else if (syncRes.dbUpdated) {
+                showToast(`"${target.name}"을(를) 삭제하고 적용 중인 구성을 다시 맞췄습니다.`);
+            } else {
+                showToast(`"${target.name}"을(를) 삭제했습니다.`);
+            }
             render();
         } catch (err) {
             showToast(`삭제 실패: ${errorText(err)}`, true);
@@ -1604,19 +1882,44 @@ export function createPluginUI({
         const mode = replace ? 'replace' : 'merge';
         const currentState = normalizePluginState(getState());
         const result = importPresetsJson(text, currentState, mode);
-        const { state: savedState } = await savePluginState(result.state, api);
+        let savedState;
+        let syncNote = '';
+        if (mode === 'replace') {
+            const syncRes = await bridgeOps.syncAppliedStateToRisu(currentState, result.state, api);
+            savedState = syncRes.state;
+            if (syncRes.restoredVanilla) {
+                syncNote = '\n적용 중이던 프리셋이 목록에서 빠져 원래 테마로 복원했습니다.';
+            } else if (syncRes.dbUpdated) {
+                syncNote = '\n적용 중이던 프리셋 구성을 RisuAI에도 다시 맞췄습니다.';
+            }
+        } else {
+            const saveRes = await savePluginState(result.state, api);
+            savedState = saveRes.state;
+        }
         setState(savedState);
         const firstImported = result.importedPresets[0] || (result.skippedBuiltins || [])[0];
-        const keepDraft = uiState.hasUnsavedDraft && !uiState.draftIsNew && mode !== 'replace'
-            && Boolean(findPreset(savedState, uiState.selectedPresetId));
+        const keepDraft =
+            mode !== 'replace' &&
+            uiState.hasUnsavedDraft &&
+            (uiState.draftIsNew || Boolean(findPreset(savedState, uiState.selectedPresetId)));
         if (firstImported && !keepDraft) {
             uiState.selectedPresetId = firstImported.id;
             uiState.draftPreset = clonePresetDraft(firstImported);
             uiState.hasUnsavedDraft = false;
             uiState.draftIsNew = false;
         }
-        const skippedNote = result.skippedBuiltinCount ? `\n기본 제공과 같은 ${result.skippedBuiltinCount}건은 이미 있어서 건너뛰었습니다.` : '';
-        showToast(`프리셋 ${result.importedCount}건을 가져왔습니다. (새로 추가 ${result.addedCount}, 갱신 ${result.updatedCount})${skippedNote}`);
+        const notes = [];
+        if (result.skippedBuiltinCount) {
+            notes.push(`기본 제공과 같은 ${result.skippedBuiltinCount}건은 이미 있어서 건너뛰었습니다.`);
+        }
+        if (result.skippedEmptyCount) {
+            notes.push(`내용이 비어 있는 ${result.skippedEmptyCount}건은 건너뛰었습니다.`);
+        }
+        if (syncNote) {
+            notes.push(syncNote.trim());
+        }
+        const suffix = notes.length ? `\n${notes.join('\n')}` : '';
+        showToast(`프리셋 ${result.importedCount}건을 가져왔습니다. (새로 추가 ${result.addedCount}, 갱신 ${result.updatedCount})${suffix}`);
         render();
     }
 
@@ -1719,12 +2022,57 @@ export function createPluginUI({
         }
     }
 
+    function getApplyButtonLabel(state, preset) {
+        if (!preset) {
+            return 'RisuAI에 적용';
+        }
+        if (!uiState.draftIsNew && state.appliedPresetIds.includes(preset.id)) {
+            return '다시 적용';
+        }
+        if (state.stackPresets) {
+            if (!presetHasHtml(preset) && state.appliedPresetIds.length > 0) {
+                return '겹쳐 적용';
+            }
+            if (
+                presetHasHtml(preset) &&
+                state.appliedPresetIds.some((id) => {
+                    const p = findPreset(state, id);
+                    return p && !presetHasHtml(p);
+                })
+            ) {
+                return '테마 교체';
+            }
+        }
+        return 'RisuAI에 적용';
+    }
+
+    function setAppliedPopoverOpen(open) {
+        uiState.appliedPopoverOpen = open;
+        if (!rootEl) {
+            return;
+        }
+        if (open && uiState.menuOpen) {
+            setMenuOpen(false);
+        }
+        const pop = rootEl.querySelector('[data-role="applied-popover"]');
+        const badge = rootEl.querySelector('[data-role="applied-badge-btn"]');
+        if (pop) {
+            pop.classList.toggle('open', open);
+        }
+        if (badge) {
+            badge.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+    }
+
     function setMenuOpen(open) {
         uiState.menuOpen = open;
         if (!rootEl) {
             return;
         }
         if (open) {
+            if (uiState.appliedPopoverOpen) {
+                setAppliedPopoverOpen(false);
+            }
             refreshMenuItemStates();
         }
         const menu = rootEl.querySelector('[data-role="more-menu"]');
@@ -1738,6 +2086,7 @@ export function createPluginUI({
     }
 
     function createMoreMenu() {
+        const state = normalizePluginState(getState());
         const wrap = el('div', { className: 'rtpv3-menu-wrap' });
         const btn = el('button', {
             className: 'ghost',
@@ -1767,12 +2116,38 @@ export function createPluginUI({
                 },
             });
 
+        const stackItem = el(
+            'button',
+            {
+                className: 'rtpv3-menu-item rtpv3-menu-check',
+                role: 'menuitemcheckbox',
+                'aria-checked': state.stackPresets ? 'true' : 'false',
+                help: 'menu.stack-toggle',
+                onClick: (e) => {
+                    e.stopPropagation();
+                    setMenuOpen(false);
+                    handleToggleStackPresets(!normalizePluginState(getState()).stackPresets);
+                },
+            },
+            [
+                el('span', { text: '프리셋 중복 적용' }),
+                el('span', {
+                    className: `rtpv3-menu-state${state.stackPresets ? ' on' : ''}`,
+                    text: state.stackPresets ? '켜짐' : '꺼짐',
+                }),
+            ],
+        );
+
         menu.append(
             el('div', { className: 'rtpv3-menu-group', text: '이 프리셋' }),
             item('복제', () => handleDuplicatePreset(), '', 'menu.duplicate'),
             item('그룹으로 옮기기…', () => openModal({ type: 'move-group' }), '', 'menu.move-group'),
             item('그룹에서 빼기', () => handleUngroupCurrent(), '', 'menu.ungroup'),
             item('JSON 내보내기 (복사)', () => {
+                if (!hasPresetContent(uiState.draftPreset)) {
+                    showToast('HTML·CSS·정규식 중 하나는 채워야 내보낼 수 있습니다.', true);
+                    return;
+                }
                 const st = normalizePluginState(getState());
                 const saved = st.presets.find((p) => p.id === uiState.draftPreset.id);
                 const groupName = isDraftBuiltin() ? getBuiltinPreset(uiState.draftPreset.id)?.groupName : getPresetGroupName(st, saved);
@@ -1782,6 +2157,8 @@ export function createPluginUI({
             item('JSON 붙여넣기', () => openModal({ type: 'paste-import', text: '', replace: false }), '', 'menu.paste-json'),
             item('파일 불러오기 (.json)', () => fileInputEl?.click(), '', 'menu.file-import'),
             el('div', { className: 'rtpv3-menu-group', text: '전체' }),
+            stackItem,
+            el('div', { className: 'rtpv3-menu-sub', text: '켜면 CSS·정규식 프리셋을 테마 위에 겹칩니다' }),
             item('전체 백업 복사', () => copyWithFallback('전체 프리셋 백업 JSON', exportAllPresetsJson(getState())), '', 'menu.backup-all'),
             item('숨긴 기본 프리셋 다시 보기', () => openModal({ type: 'unhide' }), '', 'menu.unhide'),
             el('div', { className: 'rtpv3-menu-group', text: 'RisuAI' }),
@@ -1791,7 +2168,7 @@ export function createPluginUI({
         menu.addEventListener('click', (e) => e.stopPropagation());
         menu.classList.toggle('open', uiState.menuOpen);
         // 저장하지 않은 새 프리셋이거나 그룹이 없으면 그룹 항목을 흐리게 한다.
-        const savedPreset = normalizePluginState(getState()).presets.find((p) => p.id === uiState.draftPreset?.id);
+        const savedPreset = state.presets.find((p) => p.id === uiState.draftPreset?.id);
         const moveItem = menu.querySelector('[data-help="menu.move-group"]');
         const ungroupItem = menu.querySelector('[data-help="menu.ungroup"]');
         if (moveItem) {
@@ -1805,6 +2182,54 @@ export function createPluginUI({
     }
 
     // ───────────────────────── 목록 패널 ─────────────────────────
+
+    function formatAppliedSummary(state) {
+        const ids = state.appliedPresetIds || [];
+        if (ids.length === 0) {
+            return 'RisuAI 기본 설정 사용 중';
+        }
+        const nameAt = (i) => findPreset(state, ids[i])?.name || ids[i];
+        if (ids.length === 1) {
+            return `적용 중: ${nameAt(0)}`;
+        }
+        if (ids.length === 2) {
+            return `적용 중: ${nameAt(0)} + ${nameAt(1)}`;
+        }
+        return `적용 중: ${nameAt(0)} + ${nameAt(1)} 외 ${ids.length - 2}개`;
+    }
+
+    function buildAppliedRows(state) {
+        const ids = state.appliedPresetIds || [];
+        const hiddenSet = new Set(state.hiddenBuiltinIds || []);
+        return ids.map((id, idx) => {
+            const preset = findPreset(state, id);
+            const isHidden = isBuiltinId(id) && hiddenSet.has(id);
+            const name = preset ? `${preset.name}${isHidden ? ' (숨김)' : ''}` : `${id} (없음)`;
+            const orderEl = state.stackPresets
+                ? el('span', { className: 'rtpv3-applied-order', text: String(idx + 1) })
+                : null;
+            const nameBtn = el('button', {
+                className: 'rtpv3-applied-name',
+                text: name,
+                title: isHidden ? '숨긴 기본 프리셋입니다. ⋯ 메뉴에서 다시 보이게 할 수 있습니다.' : name,
+                disabled: !preset || isHidden,
+                onClick: (e) => {
+                    e.stopPropagation();
+                    setAppliedPopoverOpen(false);
+                    selectPreset(id);
+                },
+            });
+            const deactBtn = el('button', {
+                className: 'small ghost danger-text',
+                text: '해제',
+                onClick: (e) => {
+                    e.stopPropagation();
+                    handleDeactivatePreset(id);
+                },
+            });
+            return el('div', { className: 'rtpv3-applied-item' }, [orderEl, nameBtn, deactBtn].filter(Boolean));
+        });
+    }
 
     function createListPanel(state) {
         const panel = el('section', { className: 'rtpv3-panel rtpv3-panel-list' });
@@ -1838,6 +2263,42 @@ export function createPluginUI({
         panel.appendChild(head);
 
         const body = el('div', { className: 'rtpv3-panel-body', dataset: { scrollKey: 'list' } });
+        if (state.appliedPresetIds.length > 0) {
+            const mobileBar = el('div', { className: 'rtpv3-mobile-applied' });
+            mobileBar.appendChild(
+                el(
+                    'button',
+                    {
+                        className: 'rtpv3-mobile-applied-toggle',
+                        'aria-expanded': uiState.mobileAppliedOpen ? 'true' : 'false',
+                        help: 'header.status',
+                        onClick: () => {
+                            uiState.mobileAppliedOpen = !uiState.mobileAppliedOpen;
+                            render();
+                        },
+                    },
+                    [
+                        el('span', { className: 'rtpv3-mobile-applied-summary', text: formatAppliedSummary(state) }),
+                        el('span', { text: uiState.mobileAppliedOpen ? '▴' : '▾', 'aria-hidden': 'true' }),
+                    ],
+                ),
+            );
+            if (uiState.mobileAppliedOpen) {
+                mobileBar.append(...buildAppliedRows(state));
+                if (state.appliedPresetIds.length >= 2) {
+                    mobileBar.appendChild(
+                        el('div', { className: 'rtpv3-applied-pop-foot' }, [
+                            el('button', {
+                                className: 'small ghost danger-text',
+                                text: '모두 해제',
+                                onClick: () => openModal({ type: 'confirm-restore' }),
+                            }),
+                        ]),
+                    );
+                }
+            }
+            body.appendChild(mobileBar);
+        }
         const listContainer = el('div', { className: 'rtpv3-preset-list', role: 'list' });
         searchInput.addEventListener('input', (e) => {
             uiState.searchQuery = e.target.value;
@@ -1935,7 +2396,7 @@ export function createPluginUI({
 
     function createBuiltinGroupBlock(groupName, members, visibleMembers, state, searching) {
         const expanded = searching || state.expandedBuiltinGroups.includes(groupName);
-        const hasActive = members.some((p) => p.id === state.activePresetId);
+        const hasActive = members.some((p) => state.appliedPresetIds.includes(p.id));
         const hasSelected = members.some((p) => p.id === uiState.selectedPresetId);
         const head = el(
             'div',
@@ -1978,7 +2439,8 @@ export function createPluginUI({
 
     function createPresetCard(preset, state, { isNew = false, builtin = false } = {}) {
         const isSelected = preset.id === uiState.selectedPresetId;
-        const isActive = !isNew && preset.id === state.activePresetId;
+        const appliedIdx = isNew ? -1 : state.appliedPresetIds.indexOf(preset.id);
+        const isActive = appliedIdx >= 0;
         const card = el('button', {
             className: `rtpv3-preset-card${isSelected ? ' selected' : ''}${isNew ? ' unsaved' : ''}`,
             role: 'listitem',
@@ -2028,9 +2490,24 @@ export function createPluginUI({
             titleRow.appendChild(el('span', { className: 'rtpv3-badge warn', text: '저장 안 됨', help: 'list.badge-unsaved' }));
         }
         if (isActive) {
-            titleRow.appendChild(el('span', { className: 'rtpv3-badge active', text: '적용 중', help: 'list.badge-active' }));
+            titleRow.appendChild(
+                el('span', {
+                    className: 'rtpv3-badge active',
+                    text: state.stackPresets ? `적용 ${appliedIdx + 1}` : '적용 중',
+                    help: 'list.badge-active',
+                }),
+            );
         }
         card.appendChild(titleRow);
+
+        const kindPills = [
+            presetHasHtml(preset) ? el('span', { className: 'rtpv3-kind-pill', text: 'HTML' }) : null,
+            presetHasCss(preset) ? el('span', { className: 'rtpv3-kind-pill', text: 'CSS' }) : null,
+            presetHasRegex(preset) ? el('span', { className: 'rtpv3-kind-pill', text: '정규식' }) : null,
+        ].filter(Boolean);
+        if (kindPills.length > 0) {
+            card.appendChild(el('div', { className: 'rtpv3-kind-row' }, kindPills));
+        }
 
         const memoLine = String(preset.description || '').split('\n').find((line) => line.trim()) || '';
         if (memoLine) {
@@ -2041,7 +2518,7 @@ export function createPluginUI({
 
     function createGroupBlock(group, members, visibleMembers, state, searching) {
         const expanded = searching || !group.collapsed;
-        const hasActive = members.some((p) => p.id === state.activePresetId);
+        const hasActive = members.some((p) => state.appliedPresetIds.includes(p.id));
         const hasSelected = members.some((p) => p.id === uiState.selectedPresetId);
 
         const nameSpan = el('span', { className: 'rtpv3-group-name', text: group.name });
@@ -2466,7 +2943,7 @@ export function createPluginUI({
         const head = el('div', { className: 'rtpv3-panel-head' });
 
         const canSave = uiState.hasUnsavedDraft || uiState.draftIsNew;
-        const isActive = !uiState.draftIsNew && state.activePresetId === uiState.draftPreset.id;
+        const isActive = !uiState.draftIsNew && state.appliedPresetIds.includes(uiState.draftPreset.id);
 
         const toolbar = el('div', { className: 'rtpv3-toolbar' }, [
             el('button', {
@@ -2492,14 +2969,22 @@ export function createPluginUI({
             }),
             el('div', { className: 'rtpv3-spacer' }),
             el('div', { className: 'rtpv3-toolbar-end' }, [
+                isActive
+                    ? el('button', {
+                          className: 'ghost',
+                          text: '적용 해제',
+                          help: 'tb.deactivate',
+                          onClick: () => handleDeactivatePreset(uiState.draftPreset.id),
+                      })
+                    : null,
                 el('button', {
                     className: 'primary',
-                    text: isActive ? 'RisuAI에 다시 적용' : 'RisuAI에 적용',
+                    text: getApplyButtonLabel(state, uiState.draftPreset),
                     help: 'tb.apply',
                     onClick: () => handleActivatePreset(uiState.draftPreset),
                 }),
                 createMoreMenu(),
-            ]),
+            ].filter(Boolean)),
         ]);
         head.appendChild(toolbar);
 
@@ -2632,7 +3117,7 @@ export function createPluginUI({
                 key: 'html',
                 helpKey: 'ed.html',
                 label: 'Custom HTML',
-                hint: '<risutextbox> 같은 슬롯은 닫는 태그까지 씁니다',
+                hint: '비워 두면 CSS·정규식만 있는 프리셋이 됩니다 (<risutextbox> 등 슬롯은 닫는 태그까지)',
                 value: uiState.draftPreset.guiHTML,
                 placeholder: [
                     'Custom HTML을 붙여넣거나 작성합니다.',
@@ -3008,21 +3493,38 @@ export function createPluginUI({
 
     function createPreviewPanel(state = normalizePluginState(getState())) {
         const panel = el('section', { className: 'rtpv3-panel rtpv3-panel-preview' });
-        const isActive = !uiState.draftIsNew && Boolean(uiState.draftPreset) && state.activePresetId === uiState.draftPreset.id;
+        const isActive = !uiState.draftIsNew && Boolean(uiState.draftPreset) && state.appliedPresetIds.includes(uiState.draftPreset.id);
 
         const head = el('div', { className: 'rtpv3-panel-head' });
         head.appendChild(
             el('div', { className: 'rtpv3-panel-title' }, [
-                el('span', { text: '미리보기' }),
+                el('div', { className: 'rtpv3-row' }, [
+                    el('span', { text: '미리보기' }),
+                    el('span', {
+                        className: 'rtpv3-badge',
+                        text: '기본 화면 근사치',
+                        help: 'pv.approx',
+                        dataset: { role: 'preview-approx-badge' },
+                        style: { display: 'none' },
+                    }),
+                ]),
                 el('div', { className: 'rtpv3-row' }, [
                     el('span', { className: 'rtpv3-muted', text: '실시간 반영' }),
+                    isActive
+                        ? el('button', {
+                              className: 'ghost small rtpv3-pv-apply-btn',
+                              text: '해제',
+                              help: 'tb.deactivate',
+                              onClick: () => handleDeactivatePreset(uiState.draftPreset.id),
+                          })
+                        : null,
                     el('button', {
                         className: 'primary small rtpv3-pv-apply-btn',
-                        text: isActive ? 'RisuAI에 다시 적용' : 'RisuAI에 적용',
+                        text: getApplyButtonLabel(state, uiState.draftPreset),
                         help: 'pv.apply',
                         onClick: () => handleActivatePreset(uiState.draftPreset),
                     }),
-                ]),
+                ].filter(Boolean)),
             ]),
         );
         head.appendChild(
@@ -3160,7 +3662,7 @@ export function createPluginUI({
                     el('span', { className: 'rtpv3-field-label', text: '샘플 메시지', help: 'pv.sample-text' }),
                     sampleInput,
                 ]),
-                el('label', { className: 'rtpv3-check-row', help: 'pv.apply-regex' }, [regexChk, el('span', { text: '이 프리셋의 디스플레이 정규식도 적용' })]),
+                el('label', { className: 'rtpv3-check-row', help: 'pv.apply-regex' }, [regexChk, el('span', { text: '적용될 디스플레이 정규식도 미리보기에 반영' })]),
             ]),
         );
         body.appendChild(details);
@@ -3250,6 +3752,14 @@ export function createPluginUI({
                         className: 'primary',
                         text: '가져오기',
                         onClick: async () => {
+                            if (replaceChk.checked && needsDiscardConfirm()) {
+                                openModal({
+                                    type: 'confirm-discard',
+                                    action: 'import-replace',
+                                    rawText: area.value,
+                                });
+                                return;
+                            }
                             try {
                                 await importJsonText(area.value, { replace: replaceChk.checked });
                                 closeModal();
@@ -3364,6 +3874,17 @@ export function createPluginUI({
             setTimeout(() => area.select(), 0);
         } else if (m.type === 'confirm-delete') {
             const name = m.preset?.name || '이름 없는 프리셋';
+            const st = normalizePluginState(getState());
+            const isApplied = !m.isNew && m.preset?.id && st.appliedPresetIds.includes(m.preset.id);
+            const isLastApplied = isApplied && st.appliedPresetIds.length === 1;
+            const deleteDesc = isApplied
+                ? isLastApplied
+                    ? '적용 중인 마지막 프리셋입니다. 삭제하면 RisuAI에서도 빠지고 원래 테마로 복원됩니다. 삭제한 프리셋은 되살릴 수 없습니다.'
+                    : '적용 중인 프리셋입니다. 삭제하면 RisuAI에서도 빠지고 남은 프리셋으로 다시 적용됩니다. 삭제한 프리셋은 되살릴 수 없습니다.'
+                : '삭제한 프리셋은 되살릴 수 없습니다. 필요하면 먼저 ⋯ 메뉴의 JSON 내보내기로 복사해 두세요.\nRisuAI에 이미 적용된 HTML·CSS는 그대로 남습니다.';
+            const hideDesc = isApplied
+                ? '기본 제공 프리셋은 지우지 않고 목록에서 숨깁니다. 지금 적용 중인 상태는 그대로 유지되며, 상단 적용 목록이나 ⋯ 메뉴의 "숨긴 기본 프리셋 다시 보기"에서 관리할 수 있습니다.'
+                : '기본 제공 프리셋은 지우지 않고 목록에서 숨깁니다. ⋯ 메뉴의 "숨긴 기본 프리셋 다시 보기"로 되살릴 수 있습니다.';
             const confirmBtn = el('button', {
                 className: 'danger',
                 text: m.isNew ? '버리기' : m.isBuiltin ? '숨기기' : '삭제',
@@ -3381,60 +3902,78 @@ export function createPluginUI({
                         text: m.isNew
                             ? '아직 목록에 저장되지 않은 프리셋입니다.'
                             : m.isBuiltin
-                            ? '기본 제공 프리셋은 지우지 않고 목록에서 숨깁니다. ⋯ 메뉴의 "숨긴 기본 프리셋 다시 보기"로 되살릴 수 있습니다.'
-                            : '삭제한 프리셋은 되살릴 수 없습니다. 필요하면 먼저 ⋯ 메뉴의 JSON 내보내기로 복사해 두세요.\nRisuAI에 이미 적용된 HTML·CSS는 그대로 남습니다.',
+                            ? hideDesc
+                            : deleteDesc,
                     }),
                 ],
                 [cancelBtn(), confirmBtn],
             );
         } else if (m.type === 'confirm-discard') {
-            const proceed = () => {
+            const proceed = async () => {
                 if (m.action === 'new') {
                     handleCreateNewPreset({ force: true });
                 } else if (m.action === 'capture') {
                     uiState.hasUnsavedDraft = false;
                     uiState.draftIsNew = false;
                     handleCaptureVanillaClick();
+                } else if (m.action === 'close') {
+                    uiState.draftPreset = null;
+                    syncSelectedPreset();
+                    render();
+                    if (api && typeof api.hideContainer === 'function') {
+                        await api.hideContainer();
+                    }
+                } else if (m.action === 'import-replace') {
+                    try {
+                        await importJsonText(m.rawText, { replace: true });
+                    } catch (err) {
+                        showToast(errorText(err), true);
+                    }
                 } else if (m.presetId) {
                     selectPreset(m.presetId, { force: true });
                 }
             };
-            const saveBtn = el('button', {
-                className: 'primary',
-                text: '저장하고 계속',
+            const isClose = m.action === 'close';
+            const isReplaceImport = m.action === 'import-replace';
+            const saveBtn = isReplaceImport
+                ? null
+                : el('button', {
+                      className: 'primary',
+                      text: isClose ? '저장하고 닫기' : '저장하고 계속',
+                      onClick: async () => {
+                          closeModal();
+                          try {
+                              await saveDraftToState();
+                              await proceed();
+                          } catch (err) {
+                              showToast(`저장 실패: ${errorText(err)}`, true);
+                          }
+                      },
+                  });
+            const discardBtn = el('button', {
+                className: 'danger',
+                text: isClose ? '버리고 닫기' : isReplaceImport ? '버리고 덮어쓰기' : '버리고 계속',
                 onClick: async () => {
                     closeModal();
-                    try {
-                        await saveDraftToState();
-                        proceed();
-                    } catch (err) {
-                        showToast(`저장 실패: ${errorText(err)}`, true);
-                    }
+                    uiState.hasUnsavedDraft = false;
+                    uiState.draftIsNew = false;
+                    await proceed();
                 },
             });
-            focusTarget = saveBtn;
+            focusTarget = saveBtn || discardBtn;
             modal = modalShell(
                 '저장하지 않은 변경이 있습니다',
                 [
                     el('div', {
                         className: 'rtpv3-modal-desc',
-                        text: `"${uiState.draftPreset?.name || '이름 없는 프리셋'}"의 변경을 저장하지 않고 넘어가면 사라집니다.`,
+                        text: isReplaceImport
+                            ? `"${uiState.draftPreset?.name || '이름 없는 프리셋'}"에 저장하지 않은 변경이 있습니다. 기존 목록을 덮어쓰며 가져오면 사라집니다.`
+                            : isClose
+                            ? `"${uiState.draftPreset?.name || '이름 없는 프리셋'}"에 저장하지 않은 변경이 있습니다. 저장하지 않고 닫으면 편집 내용이 초기화됩니다.`
+                            : `"${uiState.draftPreset?.name || '이름 없는 프리셋'}"의 변경을 저장하지 않고 넘어가면 사라집니다.`,
                     }),
                 ],
-                [
-                    cancelBtn('계속 편집'),
-                    el('button', {
-                        className: 'danger',
-                        text: '버리고 계속',
-                        onClick: () => {
-                            closeModal();
-                            uiState.hasUnsavedDraft = false;
-                            uiState.draftIsNew = false;
-                            proceed();
-                        },
-                    }),
-                    saveBtn,
-                ],
+                [cancelBtn('계속 편집'), discardBtn, saveBtn].filter(Boolean),
             );
         } else if (m.type === 'confirm-restore') {
             const okBtn = el('button', {
@@ -3529,17 +4068,74 @@ export function createPluginUI({
         }
     }
 
+    async function handleCloseRequest() {
+        if (needsDiscardConfirm()) {
+            openModal({
+                type: 'confirm-discard',
+                action: 'close',
+                name: uiState.draftPreset?.name || '편집 중인 프리셋',
+            });
+            return;
+        }
+        if (api && typeof api.hideContainer === 'function') {
+            await api.hideContainer();
+        }
+    }
+
     function createHeader(state) {
-        const activePreset = state.activePresetId ? findPreset(state, state.activePresetId) : null;
+        const appliedCount = state.appliedPresetIds.length;
+        const summary = formatAppliedSummary(state);
+        let statusNode;
+        if (appliedCount === 0) {
+            statusNode = el('span', {
+                className: 'rtpv3-badge rtpv3-header-badge',
+                text: summary,
+                help: 'header.status',
+            });
+        } else {
+            const pop = el('div', {
+                className: `rtpv3-applied-popover${uiState.appliedPopoverOpen ? ' open' : ''}`,
+                dataset: { role: 'applied-popover' },
+                onClick: (e) => e.stopPropagation(),
+            });
+            pop.append(
+                el('div', { className: 'rtpv3-applied-pop-head' }, [
+                    el('span', { text: state.stackPresets ? `적용 순서 (${appliedCount}개)` : '적용 중' }),
+                ]),
+                ...buildAppliedRows(state),
+                appliedCount >= 2
+                    ? el('div', { className: 'rtpv3-applied-pop-foot' }, [
+                          el('button', {
+                              className: 'small ghost danger-text',
+                              text: '모두 해제 (원래 테마)',
+                              onClick: () => {
+                                  setAppliedPopoverOpen(false);
+                                  openModal({ type: 'confirm-restore' });
+                              },
+                          }),
+                      ])
+                    : null,
+            );
+            const badgeBtn = el('button', {
+                className: 'rtpv3-badge active rtpv3-header-badge',
+                text: `${summary} ▾`,
+                help: 'header.status',
+                'aria-haspopup': 'true',
+                'aria-expanded': uiState.appliedPopoverOpen ? 'true' : 'false',
+                dataset: { role: 'applied-badge-btn' },
+                onClick: (e) => {
+                    e.stopPropagation();
+                    setAppliedPopoverOpen(!uiState.appliedPopoverOpen);
+                },
+            });
+            statusNode = el('div', { className: 'rtpv3-applied-wrap' }, [badgeBtn, pop]);
+        }
+
         const header = el('header', { className: 'rtpv3-header' });
         header.appendChild(
             el('div', { className: 'rtpv3-title-wrap' }, [
                 el('h1', { className: 'rtpv3-title', text: '테마 프리셋 관리자' }),
-                el('span', {
-                    className: `rtpv3-badge rtpv3-header-badge${activePreset ? ' active' : ''}`,
-                    text: activePreset ? `적용 중: ${activePreset.name}` : 'RisuAI 기본 설정 사용 중',
-                    help: 'header.status',
-                }),
+                statusNode,
             ]),
         );
         header.appendChild(
@@ -3556,11 +4152,7 @@ export function createPluginUI({
                 el('button', {
                     text: '닫기',
                     help: 'header.close',
-                    onClick: async () => {
-                        if (api && typeof api.hideContainer === 'function') {
-                            await api.hideContainer();
-                        }
-                    },
+                    onClick: () => handleCloseRequest(),
                 }),
             ]),
         );
@@ -3660,6 +4252,10 @@ export function createPluginUI({
                 closeModal();
             } else if (hideHelpPopover()) {
                 e.preventDefault();
+            } else if (uiState.appliedPopoverOpen) {
+                e.preventDefault();
+                setAppliedPopoverOpen(false);
+                rootEl?.querySelector('[data-role="applied-badge-btn"]')?.focus();
             } else if (uiState.menuOpen) {
                 e.preventDefault();
                 setMenuOpen(false);
@@ -3770,6 +4366,9 @@ export function createPluginUI({
     function handleRootClick() {
         if (uiState.menuOpen) {
             setMenuOpen(false);
+        }
+        if (uiState.appliedPopoverOpen) {
+            setAppliedPopoverOpen(false);
         }
     }
 

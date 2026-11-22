@@ -86,6 +86,42 @@ button { color: inherit; }
 }
 .risu-test-action-row button > svg { display: block; flex-shrink: 0; }
 .risu-test-info { display: flex; align-items: center; gap: .25rem; font-size: .75rem; }
+.risu-vanilla-fallback {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+.risu-vanilla-fallback-avatar {
+  flex: 0 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.risu-vanilla-fallback-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.risu-vanilla-fallback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.risu-vanilla-fallback-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.risu-vanilla-fallback-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 @media (max-width: 639px) {
   .risu-test-action-row .risu-test-desktop-action { display: none; }
 }`;

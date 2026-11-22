@@ -1,7 +1,7 @@
 {
   "format": "risu-theme-preset-single",
   "version": 1,
-  "exportedAt": "2026-11-22T15:05:07.162Z",
+  "exportedAt": "2026-11-22T15:35:25.327Z",
   "preset": {
     "id": "preset_letter-pair_cream",
     "name": "편지:양쪽 미색",
@@ -20,7 +20,7 @@
         "enabled": true
       }
     ],
-    "updatedAt": "2026-11-22T15:05:07.047Z",
+    "updatedAt": "2026-11-22T15:35:25.210Z",
     "groupName": "편지"
   }
 }

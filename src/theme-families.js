@@ -653,7 +653,7 @@ const WEBNOVEL_VARIANTS = [
         key: 'dark',
         label: '검정',
         tokens: {
-            outer: '#111112',
+            outer: '#151517',
             paper: '#151517',
             ink: '#e0deda',
             strong: '#f7f5f1',
@@ -673,7 +673,7 @@ const WEBNOVEL_VARIANTS = [
         key: 'white',
         label: '흰색',
         tokens: {
-            outer: '#f5f3ee',
+            outer: '#faf9f6',
             paper: '#faf9f6',
             ink: '#252321',
             strong: '#11100f',
@@ -693,7 +693,7 @@ const WEBNOVEL_VARIANTS = [
         key: 'bluegray',
         label: '회청',
         tokens: {
-            outer: '#1b2027',
+            outer: '#20262e',
             paper: '#20262e',
             ink: '#d4dae1',
             strong: '#eef2f6',
@@ -1347,7 +1347,7 @@ ${fillAboveCss('var(--{p}-outer)')}`,
         target: '소설 읽기',
         group: '연재란',
         label: '웹소설',
-        summary: '휴대폰 읽기에 맞춘 넓은 문단 간격. 사용자 입력은 고른 선택지처럼 오른쪽에 붙습니다.',
+        summary: 'PC 화면을 넓게 쓰는 웹소설 뷰어. 넓은 문단 간격과 오른쪽 선택지형 사용자 입력을 씁니다.',
         fonts: [FONT.pretendard],
         wrapperPad: '0',
         html: `<div class="{p} ${ROLE_CLASS}">
@@ -1361,7 +1361,7 @@ ${fillAboveCss('var(--{p}-outer)')}`,
         css: `
 .{p} {
   background: var(--{p}-outer);
-  padding: var(--{p}-wrap-y, 0px) clamp(1rem, 4vw, 2.5rem);
+  padding: var(--{p}-wrap-y, 0px) clamp(1rem, 4vw, 3rem);
 }
 .{p}__page {
   position: relative;
@@ -1403,7 +1403,7 @@ ${fillAboveCss('var(--{p}-outer)')}`,
 }
 .{p}--user .{p}__head { display: none; }
 .{p}--user .{p}__content {
-  max-width: min(86%, 30em);
+  max-width: min(82%, 38em);
   padding: .68em 1.05em;
   border: 1px solid var(--{p}-line);
   border-left: 3px solid var(--{p}-accent);
@@ -1424,7 +1424,7 @@ ${fillAboveCss('var(--{p}-outer)')}`,
             'font-size': '16.5px',
             'line-height': '1.95',
             'para-gap': '1.5em',
-            measure: '38em',
+            measure: '64rem',
             'dialog-weight': '600',
         },
     },
